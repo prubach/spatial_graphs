@@ -236,8 +236,8 @@ def read_simlified_graph_from_file(file_path):
                 continue  # Skip comments and empty lines
             parts = line.strip().split(',')
             if len(parts) == 3:
-                _, u, v = parts
-                G.add_edge(u, v)
+                t, u, v = parts
+                G.add_edge(u, v, type=t)
     return G
 
 
@@ -260,7 +260,7 @@ def topoly_graph_to_networkx(input_file, bridge_type='all'):
 if __name__=="__main__":
     #G = create_graph()
     #G = topoly_graph_to_networkx("1AOZ.cif", bridge_type='all')
-    G = topoly_graph_to_networkx("1a8e.pdb", bridge_type='all')
-    #G = read_simlified_graph_from_file("data/1AOZ-A_simplified_bonds.csv")
+    #G = topoly_graph_to_networkx("1a8e.pdb", bridge_type='all')
+    G = read_simlified_graph_from_file("data/1AOZ-A_simplified_bonds.csv")
     app=create_app(G)
     app.run(debug=True)
