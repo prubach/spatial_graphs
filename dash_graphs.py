@@ -1,7 +1,7 @@
 
 import random
 import networkx as nx
-from dash import Dash, html, dcc, Input, Output
+from dash import Dash, html, dcc, Input, Output, State, ctx
 import dash_cytoscape as cyto
 
 def create_graph(seed=42,n_cliques=5,n_bicliques=6,n_random_edges=10):
@@ -48,31 +48,94 @@ STYLE=[
 {"selector":".obstruction","style":{"background-color":"crimson","line-color":"crimson","border-width":4,"border-color":"gold","width":5}},
 ]
 
-G=create_graph()
-planar,obs=nx.check_planarity(G,counterexample=True)
-pos=nx.spring_layout(G,seed=1)
-obs_nodes=set(obs.nodes()) if not planar else set()
-obs_edges={frozenset(e) for e in obs.edges()} if not planar else set()
-obs_pos={n:pos[n] for n in obs.nodes()} if not planar else {}
+def find_multiple_kuratowski_subgraphs(graph):
+    """Finds distinct Kuratowski subgraphs by breaking found structures."""
+    G_copy = graph.copy()
+    subgraphs = []
 
-app=Dash(__name__)
-app.layout=html.Div([
-html.H2(f"Planar: {planar}"),
-dcc.RadioItems(id="mode",inline=True,value="original",options=[
-{"label":"Original","value":"original"},
-{"label":"Highlight obstruction","value":"highlight"},
-{"label":"Obstruction only","value":"obstruction"}]),
-cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,
-style={"width":"100%","height":"900px"})
-])
+    while True:
+        is_planar, certificate = nx.check_planarity(G_copy, counterexample=True)
+        if is_planar:
+            break
 
-@app.callback(Output("graph","elements"),Input("mode","value"))
-def update(mode):
-    if mode=="original":
-        return build_elements(G,pos)
-    if mode=="highlight":
-        return build_elements(G,pos,obs_nodes,obs_edges,True)
-    return build_elements(obs,obs_pos)
+        # Save the found subgraph
+        subgraphs.append(certificate)
+
+        # Remove an edge from the identified subgraph to force the algorithm
+        # to look for a different non-planar structure in the next iteration
+        edges_to_remove = list(certificate.edges())
+        if edges_to_remove:
+            G_copy.remove_edge(*edges_to_remove[0])
+        else:
+            break
+
+    return subgraphs
+
+
+def create_app(G=None):
+    if G is None:
+        G=create_graph()
+    planar,obs=nx.check_planarity(G,counterexample=True)
+    pos=nx.spring_layout(G,seed=1)
+    obs_nodes=set(obs.nodes()) if not planar else set()
+    obs_edges={frozenset(e) for e in obs.edges()} if not planar else set()
+    obs_pos={n:pos[n] for n in obs.nodes()} if not planar else {}
+    multi_subgraphs=find_multiple_kuratowski_subgraphs(G) if not planar else []
+
+    app=Dash(__name__)
+    app.layout=html.Div([
+    html.H2(f"Planar: {planar}"),
+    dcc.RadioItems(id="mode",inline=True,value="original",options=[
+    {"label":"Original","value":"original"},
+    {"label":"Highlight obstruction","value":"highlight"},
+    {"label":"Obstruction only","value":"obstruction"},
+    {"label":"Multiple obstructions","value":"multi"}]),
+    html.Div([
+    html.Button("< Prev",id="prev-btn",n_clicks=0),
+    html.Button("Next >",id="next-btn",n_clicks=0),
+    html.Span(id="subgraph-info",style={"marginLeft":"10px"}),
+    ],style={"marginTop":"8px"}),
+    dcc.Store(id="subgraph-index",data=0),
+    cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,
+    style={"width":"100%","height":"900px"})
+    ])
+
+    @app.callback(Output("subgraph-index","data"),
+    Input("prev-btn","n_clicks"),Input("next-btn","n_clicks"),
+    State("subgraph-index","data"),prevent_initial_call=True)
+    def navigate(prev_clicks,next_clicks,idx):
+        n=len(multi_subgraphs)
+        if n==0:
+            return 0
+        if ctx.triggered_id=="next-btn":
+            return (idx+1)%n
+        return (idx-1)%n
+
+    @app.callback(Output("subgraph-info","children"),Input("subgraph-index","data"))
+    def update_info(idx):
+        n=len(multi_subgraphs)
+        if n==0:
+            return "No additional Kuratowski subgraphs found."
+        return f"Found {n} Kuratowski subgraph(s) - showing {idx+1} of {n}"
+
+    @app.callback(Output("graph","elements"),Input("mode","value"),Input("subgraph-index","data"))
+    def update(mode,idx):
+        if mode=="original":
+            return build_elements(G,pos)
+        if mode=="highlight":
+            return build_elements(G,pos,obs_nodes,obs_edges,True)
+        if mode=="multi":
+            if not multi_subgraphs:
+                return build_elements(G,pos)
+            sub=multi_subgraphs[idx]
+            sub_nodes=set(sub.nodes())
+            sub_edges={frozenset(e) for e in sub.edges()}
+            return build_elements(G,pos,sub_nodes,sub_edges,True)
+        return build_elements(obs,obs_pos)
+    return app
+
 
 if __name__=="__main__":
+    G = create_graph()
+    app=create_app(G)
     app.run(debug=True)
