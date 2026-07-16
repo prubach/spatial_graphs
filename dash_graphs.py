@@ -277,10 +277,11 @@ if __name__=="__main__":
     pdbid = "1A8E"
     #G = create_graph()
     #G = topoly_graph_to_networkx("1AOZ.pdb", chain='A', bridge_type='all')
-    G = topoly_graph_to_networkx(f'{pdbid.lower()}.pdb', chain='A', bridge_type='all')
-    app = create_app(G, title=f"{pdbid}-Topoly", num_nodes=len(G.nodes()), num_edges=len(G.edges()))
-    app.run(debug=True, port=8051)
-
-    #G = read_simlified_graph_from_file(f"data/{pdbid}-A_simplified_bonds.csv", f"data/{pdbid}-A_simplified.json")
-    #app=create_app(G, title=f"{pdbid}-A Simplified Graph", num_nodes=len(G.nodes()), num_edges=len(G.edges()))
-    #app.run(debug=True, port=8050)
+    #G, tit = topoly_graph_to_networkx(f'{pdbid.lower()}.pdb', chain='A', bridge_type='all'), 'Topoly'
+    #app = create_app(G, title=f"{pdbid}-Topoly", num_nodes=len(G.nodes()), num_edges=len(G.edges()))
+    #app.run(debug=True, port=8051)
+    G, tit = read_simlified_graph_from_file(f"data/{pdbid}-A_simplified_bonds.csv", f"data/{pdbid}-A_simplified.json"), 'Simplified'
+    print('Nodes: ', sorted([int(n) for n in G.nodes()]))
+    print('Edges: ', sorted([n for n in G.edges()]))
+    app=create_app(G, title=f"{pdbid}-{tit}", num_nodes=len(G.nodes()), num_edges=len(G.edges()))
+    app.run(debug=True, port=8050)
