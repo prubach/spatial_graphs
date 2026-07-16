@@ -153,7 +153,7 @@ def find_multiple_kuratowski_subgraphs(graph):
     return subgraphs
 
 
-def create_app(G=None):
+def create_app(G=None, title="Graph Planarity Visualization", num_nodes=None, num_edges=None):
     if G is None:
         G=create_graph()
     planar,obs=nx.check_planarity(G,counterexample=True)
@@ -165,7 +165,7 @@ def create_app(G=None):
 
     app=Dash(__name__)
     app.layout=html.Div([
-    html.H2(f"Planar: {planar}"),
+    html.H3(f"{title} - Planar: {planar}, Nodes: {num_nodes}, Edges: {num_edges}"),
     dcc.RadioItems(id="mode",inline=True,value="original",options=[
     {"label":"Original","value":"original"},
     {"label":"Highlight obstruction","value":"highlight"},
@@ -185,7 +185,7 @@ def create_app(G=None):
     ],style={"marginTop":"8px"}),
     dcc.Store(id="subgraph-index",data=0),
     cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,
-    style={"width":"100%","height":"900px"})
+    style={"width":"100%","height":"750px"})
     ])
 
     @app.callback(Output("subgraph-index","data"),
@@ -274,10 +274,13 @@ def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all'):
     return G
 
 if __name__=="__main__":
+    pdbid = "1A8E"
     #G = create_graph()
-    G = topoly_graph_to_networkx("1AOZ.pdb", chain='A', bridge_type='all')
-    #G = topoly_graph_to_networkx("1a8e.pdb", chain='A', bridge_type='all')
-    #G = read_simlified_graph_from_file("data/1AOZ-A_simplified_bonds.csv", "data/1AOZ-A_simplified.json")
-    app=create_app(G)
-    #app.run(debug=True, port=8051)
-    app.run(debug=True, port=8050)
+    #G = topoly_graph_to_networkx("1AOZ.pdb", chain='A', bridge_type='all')
+    G = topoly_graph_to_networkx(f'{pdbid.lower()}.pdb', chain='A', bridge_type='all')
+    app = create_app(G, title=f"{pdbid}-Topoly", num_nodes=len(G.nodes()), num_edges=len(G.edges()))
+    app.run(debug=True, port=8051)
+
+    #G = read_simlified_graph_from_file(f"data/{pdbid}-A_simplified_bonds.csv", f"data/{pdbid}-A_simplified.json")
+    #app=create_app(G, title=f"{pdbid}-A Simplified Graph", num_nodes=len(G.nodes()), num_edges=len(G.edges()))
+    #app.run(debug=True, port=8050)
