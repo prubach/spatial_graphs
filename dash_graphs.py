@@ -37,13 +37,15 @@ def build_elements(graph,pos,obs_nodes=set(),obs_edges=set(),highlight=False):
         e={"data":{"id":str(n),"label":str(n)},"position":{"x":pos[n][0]*800,"y":pos[n][1]*800}}
         if highlight and n in obs_nodes: e["classes"]="obstruction"
         els.append(e)
-    for u,v in graph.edges():
-        e={"data":{"source":str(u),"target":str(v)}}
+    for u,v,data in graph.edges(data=True):
+        edata={"source":str(u),"target":str(v)}
+        edata.update(data)
+        e={"data":edata}
         if highlight and frozenset((u,v)) in obs_edges: e["classes"]="obstruction"
         els.append(e)
     return els
 
-STYLE=[
+BASE_STYLE=[
 #{"selector":"node","style":{"label":"data(label)","background-color":"#1976d2","color":"white","width":40,"height":40,"font-size":"10px"}},
 {"selector": "node",
 "style": {
@@ -59,11 +61,75 @@ STYLE=[
     "font-size": "20px",
 }},
 {"selector":"edge","style":{"line-color":"#999","width":2}},
+]
+OBSTRUCTION_STYLE=[
 {"selector":".obstruction","style":{"background-color":"crimson","line-color":"crimson","border-width":4,"border-color":"gold",
                                     "width":60,"height":60,}},
 {"selector":"edge.obstruction","style":{"background-color":"crimson","line-color":"crimson","border-width":4,"border-color":"gold",
                                     "width":10}},
 ]
+STYLE=BASE_STYLE+OBSTRUCTION_STYLE
+
+# Sequential blue ramp (light -> dark) for continuous edge attributes such as weight.
+SEQUENTIAL_LOW="#cde2fb"
+SEQUENTIAL_HIGH="#0d366b"
+# Fixed-order categorical palette for discrete edge attributes such as bond type.
+CATEGORICAL_PALETTE=["#2a78d6","#008300","#e87ba4","#eda100","#1baf7a","#eb6834","#4a3aa7","#e34948"]
+
+def edge_attr_keys(graph):
+    """All edge data keys present anywhere on the graph, e.g. weight, type."""
+    keys=set()
+    for _,_,data in graph.edges(data=True):
+        keys.update(data.keys())
+    return sorted(keys)
+
+def _is_numeric_attr(graph,attr):
+    values=[d[attr] for _,_,d in graph.edges(data=True) if attr in d]
+    return bool(values) and all(isinstance(v,(int,float)) and not isinstance(v,bool) for v in values)
+
+def edge_color_stylesheet(graph,attr):
+    """Cytoscape style rules coloring edges by a data attribute.
+
+    Numeric attributes (e.g. weight) get a continuous sequential ramp;
+    non-numeric attributes (e.g. bond type CA/B) get a fixed categorical palette.
+    """
+    if not attr or attr=="none":
+        return []
+    if _is_numeric_attr(graph,attr):
+        values=[d[attr] for _,_,d in graph.edges(data=True) if attr in d]
+        lo,hi=min(values),max(values)
+        if lo==hi: hi=lo+1
+        return [{"selector":"edge","style":{
+            "line-color":f"mapData({attr},{lo},{hi},{SEQUENTIAL_LOW},{SEQUENTIAL_HIGH})"}}]
+    values=sorted({d[attr] for _,_,d in graph.edges(data=True) if attr in d},key=str)
+    return [{"selector":f'edge[{attr} = "{val}"]',"style":{"line-color":CATEGORICAL_PALETTE[i%len(CATEGORICAL_PALETTE)]}}
+            for i,val in enumerate(values)]
+
+def edge_color_legend(graph,attr):
+    """A small legend Div matching edge_color_stylesheet's color assignment."""
+    if not attr or attr=="none":
+        return None
+    if _is_numeric_attr(graph,attr):
+        values=[d[attr] for _,_,d in graph.edges(data=True) if attr in d]
+        lo,hi=min(values),max(values)
+        return html.Div([
+            html.Span(f"{attr}: ",style={"fontWeight":"bold"}),
+            html.Span(str(lo)),
+            html.Div(style={"display":"inline-block","width":"120px","height":"12px","margin":"0 6px",
+                             "background":f"linear-gradient(to right, {SEQUENTIAL_LOW}, {SEQUENTIAL_HIGH})",
+                             "verticalAlign":"middle"}),
+            html.Span(str(hi)),
+        ],style={"marginTop":"6px"})
+    values=sorted({d[attr] for _,_,d in graph.edges(data=True) if attr in d},key=str)
+    swatches=[html.Span(f"{attr}: ",style={"fontWeight":"bold"})]
+    for i,val in enumerate(values):
+        color=CATEGORICAL_PALETTE[i%len(CATEGORICAL_PALETTE)]
+        swatches.append(html.Span([
+            html.Span(style={"display":"inline-block","width":"12px","height":"12px",
+                              "backgroundColor":color,"marginRight":"4px","verticalAlign":"middle"}),
+            html.Span(str(val),style={"marginRight":"12px"}),
+        ]))
+    return html.Div(swatches,style={"marginTop":"6px"})
 
 def find_multiple_kuratowski_subgraphs(graph):
     """Finds distinct Kuratowski subgraphs by breaking found structures."""
@@ -110,6 +176,13 @@ def create_app(G=None):
     html.Button("Next >",id="next-btn",n_clicks=0),
     html.Span(id="subgraph-info",style={"marginLeft":"10px"}),
     ],style={"marginTop":"8px"}),
+    html.Div([
+    html.Label("Color edges by: ",style={"marginRight":"6px"}),
+    dcc.Dropdown(id="edge-color-attr",clearable=False,style={"width":"220px","display":"inline-block"},
+    value="none",
+    options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(G)]),
+    html.Div(id="edge-color-legend"),
+    ],style={"marginTop":"8px"}),
     dcc.Store(id="subgraph-index",data=0),
     cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,
     style={"width":"100%","height":"900px"})
@@ -132,6 +205,12 @@ def create_app(G=None):
         if n==0:
             return "No additional Kuratowski subgraphs found."
         return f"Found {n} Kuratowski subgraph(s) - showing {idx+1} of {n}"
+
+    @app.callback(Output("graph","stylesheet"),Output("edge-color-legend","children"),
+    Input("edge-color-attr","value"))
+    def update_edge_colors(attr):
+        stylesheet=BASE_STYLE+edge_color_stylesheet(G,attr)+OBSTRUCTION_STYLE
+        return stylesheet,edge_color_legend(G,attr)
 
     @app.callback(Output("graph","elements"),Input("mode","value"),Input("subgraph-index","data"))
     def update(mode,idx):
@@ -175,12 +254,13 @@ def topoly_graph_to_networkx(input_file, bridge_type='all'):
     print(edges)
     G = nx.Graph()
     for edge in edges:
-        G.add_edge(f'{edge[0]}', f'{edge[1]}', weight = 5 if edge[2] == 'CA' else 1)
+        G.add_edge(f'{edge[0]}', f'{edge[1]}', weight=5 if edge[2] == 'CA' else 1, type=edge[2])
     return G
 
 if __name__=="__main__":
     #G = create_graph()
-    G = topoly_graph_to_networkx("1AOZ.cif", bridge_type='all')
+    #G = topoly_graph_to_networkx("1AOZ.cif", bridge_type='all')
+    G = topoly_graph_to_networkx("1a8e.pdb", bridge_type='all')
     #G = read_simlified_graph_from_file("data/1AOZ-A_simplified_bonds.csv")
     app=create_app(G)
     app.run(debug=True)
