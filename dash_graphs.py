@@ -228,8 +228,17 @@ def create_app(G=None):
         return build_elements(obs,obs_pos)
     return app
 
-def read_simlified_graph_from_file(file_path):
+def read_simlified_graph_from_file(file_path, node_list_json=None):
     G = nx.Graph()
+    atoms = None
+    atom_list = None
+    if node_list_json:
+        import json
+        with open(node_list_json, 'r') as f:
+            nodes = json.load(f)
+            atoms = nodes.get('atoms')
+            atom_list = { a['index'] : a for a in atoms } if atoms else {}
+            #G.add_nodes_from(nodes)
     with open(file_path, 'r') as f:
         for line in f:
             if line.startswith('#') or not line.strip():
@@ -237,19 +246,26 @@ def read_simlified_graph_from_file(file_path):
             parts = line.strip().split(',')
             if len(parts) == 3:
                 t, u, v = parts
+                if atom_list:
+                    u = atom_list.get(int(u), {}).get('auth_residue_id', u)
+                    v = atom_list.get(int(v), {}).get('auth_residue_id', v)
                 G.add_edge(u, v, type=t)
     return G
 
 
-def topoly_graph_to_networkx(input_file, bridge_type='all'):
-    g = tp.Graph('data/' + input_file, bridges_type=bridge_type)
+def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all'):
+    g = tp.Graph('data/' + input_file, chain=chain, bridges_type=bridge_type)
     edges = []
     for n in range(len(g.arcs) - 1):
         arc = g.arcs[n]
-        if [arc[0], arc[-1]] not in g.bridges:
-            edges.append([arc[0], arc[-1], 'CA'])
-    for br in g.bridges:
-        edges.append([br[0], br[1], 'B'])
+        #if [arc[0], arc[-1]] not in g.bridges:
+        edges.append([arc[0], arc[-1], 'CA'])
+    for br in g.bridges_disulfide:
+        edges.append([br[0], br[1], 'disulfide'])
+    for br in g.bridges_covalent:
+        edges.append([br[0], br[1], 'covalent'])
+    for br in g.bridges_ion:
+        edges.append([br[0], br[1], 'ion'])
     print(input_file + ' ' + bridge_type + ": ", end="")
     print(edges)
     G = nx.Graph()
@@ -259,8 +275,9 @@ def topoly_graph_to_networkx(input_file, bridge_type='all'):
 
 if __name__=="__main__":
     #G = create_graph()
-    #G = topoly_graph_to_networkx("1AOZ.cif", bridge_type='all')
-    #G = topoly_graph_to_networkx("1a8e.pdb", bridge_type='all')
-    G = read_simlified_graph_from_file("data/1AOZ-A_simplified_bonds.csv")
+    G = topoly_graph_to_networkx("1AOZ.pdb", chain='A', bridge_type='all')
+    #G = topoly_graph_to_networkx("1a8e.pdb", chain='A', bridge_type='all')
+    #G = read_simlified_graph_from_file("data/1AOZ-A_simplified_bonds.csv", "data/1AOZ-A_simplified.json")
     app=create_app(G)
-    app.run(debug=True)
+    #app.run(debug=True, port=8051)
+    app.run(debug=True, port=8050)
