@@ -40,6 +40,22 @@ def test_bridges():
     assert bridges == bridges_expected
 
 
+def topoly_graph_to_networkx(input_file, bridge_type='all'):
+    g = Graph('data/' + input_file, bridges_type=bridge_type)
+    edges = []
+    for n in range(len(g.arcs) - 1):
+        arc = g.arcs[n]
+        if [arc[0], arc[-1]] not in g.bridges:
+            edges.append([arc[0], arc[-1], 'CA'])
+    for br in g.bridges:
+        edges.append([br[0], br[1], 'B'])
+    print(input_file + ' ' + bridge_type + ": ", end="")
+    print(edges)
+    G = nx.Graph()
+    for edge in edges:
+        G.add_edge(f'{edge[0]}', f'{edge[1]}', weight = 5 if edge[2] == 'CA' else 1)
+    return G
+
 
 def find_non_planar_subgraph(G):
     # Check if graph is planar

@@ -3,6 +3,7 @@ import random
 import networkx as nx
 from dash import Dash, html, dcc, Input, Output, State, ctx
 import dash_cytoscape as cyto
+import topoly as tp
 
 def create_graph(seed=42,n_cliques=5,n_bicliques=6,n_random_edges=10):
     random.seed(seed)
@@ -43,9 +44,25 @@ def build_elements(graph,pos,obs_nodes=set(),obs_edges=set(),highlight=False):
     return els
 
 STYLE=[
-{"selector":"node","style":{"label":"data(label)","background-color":"#1976d2","color":"white","width":20,"height":20,"font-size":"9px"}},
+#{"selector":"node","style":{"label":"data(label)","background-color":"#1976d2","color":"white","width":40,"height":40,"font-size":"10px"}},
+{"selector": "node",
+"style": {
+    "label": "data(label)",
+    "width":60,
+    "height":60,
+    #"width": "mapData(degree,1,15,15,40)",
+    #"height": "mapData(degree,1,15,15,40)",
+    "background-color": "#1976d2",
+    "color": "white",
+    "text-valign": "center",
+    "text-halign": "center",
+    "font-size": "20px",
+}},
 {"selector":"edge","style":{"line-color":"#999","width":2}},
-{"selector":".obstruction","style":{"background-color":"crimson","line-color":"crimson","border-width":4,"border-color":"gold","width":5}},
+{"selector":".obstruction","style":{"background-color":"crimson","line-color":"crimson","border-width":4,"border-color":"gold",
+                                    "width":60,"height":60,}},
+{"selector":"edge.obstruction","style":{"background-color":"crimson","line-color":"crimson","border-width":4,"border-color":"gold",
+                                    "width":10}},
 ]
 
 def find_multiple_kuratowski_subgraphs(graph):
@@ -60,7 +77,6 @@ def find_multiple_kuratowski_subgraphs(graph):
 
         # Save the found subgraph
         subgraphs.append(certificate)
-
         # Remove an edge from the identified subgraph to force the algorithm
         # to look for a different non-planar structure in the next iteration
         edges_to_remove = list(certificate.edges())
@@ -68,7 +84,6 @@ def find_multiple_kuratowski_subgraphs(graph):
             G_copy.remove_edge(*edges_to_remove[0])
         else:
             break
-
     return subgraphs
 
 
@@ -134,8 +149,38 @@ def create_app(G=None):
         return build_elements(obs,obs_pos)
     return app
 
+def read_simlified_graph_from_file(file_path):
+    G = nx.Graph()
+    with open(file_path, 'r') as f:
+        for line in f:
+            if line.startswith('#') or not line.strip():
+                continue  # Skip comments and empty lines
+            parts = line.strip().split(',')
+            if len(parts) == 3:
+                _, u, v = parts
+                G.add_edge(u, v)
+    return G
+
+
+def topoly_graph_to_networkx(input_file, bridge_type='all'):
+    g = tp.Graph('data/' + input_file, bridges_type=bridge_type)
+    edges = []
+    for n in range(len(g.arcs) - 1):
+        arc = g.arcs[n]
+        if [arc[0], arc[-1]] not in g.bridges:
+            edges.append([arc[0], arc[-1], 'CA'])
+    for br in g.bridges:
+        edges.append([br[0], br[1], 'B'])
+    print(input_file + ' ' + bridge_type + ": ", end="")
+    print(edges)
+    G = nx.Graph()
+    for edge in edges:
+        G.add_edge(f'{edge[0]}', f'{edge[1]}', weight = 5 if edge[2] == 'CA' else 1)
+    return G
 
 if __name__=="__main__":
-    G = create_graph()
+    #G = create_graph()
+    G = topoly_graph_to_networkx("1AOZ.cif", bridge_type='all')
+    #G = read_simlified_graph_from_file("data/1AOZ-A_simplified_bonds.csv")
     app=create_app(G)
     app.run(debug=True)
