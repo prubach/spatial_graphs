@@ -252,9 +252,11 @@ def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL):
     """Load a graph for a PDB id using either the topoly bridge extraction or
     the pre-simplified CSV/JSON pair. Returns (graph, source_label)."""
     if is_topoly:
-        return topoly_graph_to_networkx(f'{pdbid.lower()}.pdb', chain='A', bridge_type='all', reduce=reduce), 'Topoly'
-    return read_simlified_graph_from_file(f"data/{pdbid}-A_simplified_bonds.csv",
-                                           f"data/{pdbid}-A_simplified.json"), 'Simplified'
+        #  chain='A',
+        return topoly_graph_to_networkx(f'{pdbid.upper()}.cif', bridge_type='all', reduce=reduce), 'Topoly'
+        #return topoly_graph_to_networkx(f'{pdbid.lower()}.cif', chain='A', bridge_type='all', reduce=reduce), 'Topoly'
+    return read_simlified_graph_from_file(f"data/{pdbid.upper()}-A_simplified_bonds.csv",
+                                           f"data/{pdbid.upper()}-A_simplified.json"), 'Simplified'
 
 def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topoly=False):
     if G is None:
@@ -358,6 +360,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if not pdbid_value:
             raise PreventUpdate
         g,tit=load_graph_by_id(pdbid_value,source_type=="topoly",reduce_value)
+        print(f'nodes: {sorted(g.nodes())}')
+        print(f'edges: {sorted(g.edges())}')
         recompute(g)
         options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(g)]
         return make_title(f"{pdbid_value}-{tit}",g),options,"none","original",0,(version or 0)+1
