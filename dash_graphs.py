@@ -2,7 +2,9 @@
 import random
 import networkx as nx
 from dash import Dash, html, dcc, Input, Output, State, ctx
+from dash.exceptions import PreventUpdate
 import dash_cytoscape as cyto
+import plotly.graph_objects as go
 import topoly as tp
 
 def create_graph(seed=42,n_cliques=5,n_bicliques=6,n_random_edges=10):
@@ -131,6 +133,73 @@ def edge_color_legend(graph,attr):
         ]))
     return html.Div(swatches,style={"marginTop":"6px"})
 
+def _hex_lerp(c1,c2,t):
+    c1,c2=c1.lstrip('#'),c2.lstrip('#')
+    r1,g1,b1=int(c1[0:2],16),int(c1[2:4],16),int(c1[4:6],16)
+    r2,g2,b2=int(c2[0:2],16),int(c2[2:4],16),int(c2[4:6],16)
+    return f"#{round(r1+(r2-r1)*t):02x}{round(g1+(g2-g1)*t):02x}{round(b1+(b2-b1)*t):02x}"
+
+def edge_color_map(graph,attr):
+    """Edge (frozenset) -> hex color, mirroring edge_color_stylesheet but as a lookup table for Plotly."""
+    if not attr or attr=="none":
+        return {}
+    if _is_numeric_attr(graph,attr):
+        values=[d[attr] for _,_,d in graph.edges(data=True) if attr in d]
+        lo,hi=min(values),max(values)
+        if lo==hi: hi=lo+1
+        return {frozenset((u,v)):_hex_lerp(SEQUENTIAL_LOW,SEQUENTIAL_HIGH,(d[attr]-lo)/(hi-lo))
+                for u,v,d in graph.edges(data=True) if attr in d}
+    values=sorted({d[attr] for _,_,d in graph.edges(data=True) if attr in d},key=str)
+    palette={val:CATEGORICAL_PALETTE[i%len(CATEGORICAL_PALETTE)] for i,val in enumerate(values)}
+    return {frozenset((u,v)):palette[d[attr]] for u,v,d in graph.edges(data=True) if attr in d}
+
+def get_node_positions_3d(graph,seed=1):
+    """Node -> (x,y,z), taken from each node's 'coords' attribute (set from PDB/topoly
+    coordinates or from the JSON atom records); falls back to a 3D spring layout when
+    coordinates aren't available for every node."""
+    if graph.number_of_nodes() and all(graph.nodes[n].get('coords') is not None for n in graph.nodes()):
+        return {n:tuple(graph.nodes[n]['coords']) for n in graph.nodes()}
+    return nx.spring_layout(graph,dim=3,seed=seed)
+
+def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=False,edge_colors=None):
+    edge_colors=edge_colors or {}
+    by_color={}
+    for u,v in graph.edges():
+        if highlight and frozenset((u,v)) in obs_edges:
+            continue
+        by_color.setdefault(edge_colors.get(frozenset((u,v)),"#999"),[]).append((u,v))
+    traces=[]
+    for color,edges in by_color.items():
+        xs,ys,zs=[],[],[]
+        for u,v in edges:
+            x0,y0,z0=node_pos[u]; x1,y1,z1=node_pos[v]
+            xs+=[x0,x1,None]; ys+=[y0,y1,None]; zs+=[z0,z1,None]
+        traces.append(go.Scatter3d(x=xs,y=ys,z=zs,mode="lines",
+            line=dict(color=color,width=3),hoverinfo="none",showlegend=False))
+    if highlight and obs_edges:
+        xs,ys,zs=[],[],[]
+        for u,v in graph.edges():
+            if frozenset((u,v)) in obs_edges:
+                x0,y0,z0=node_pos[u]; x1,y1,z1=node_pos[v]
+                xs+=[x0,x1,None]; ys+=[y0,y1,None]; zs+=[z0,z1,None]
+        traces.append(go.Scatter3d(x=xs,y=ys,z=zs,mode="lines",
+            line=dict(color="crimson",width=8),hoverinfo="none",showlegend=False))
+    node_x,node_y,node_z,node_color,node_text=[],[],[],[],[]
+    for n in graph.nodes():
+        x,y,z=node_pos[n]
+        node_x.append(x); node_y.append(y); node_z.append(z)
+        node_color.append("crimson" if highlight and n in obs_nodes else "#1976d2")
+        node_text.append(str(n))
+    traces.append(go.Scatter3d(x=node_x,y=node_y,z=node_z,mode="markers+text",
+        text=node_text,textposition="top center",textfont=dict(size=9,color="#333"),
+        marker=dict(size=6,color=node_color,line=dict(width=1,color="white")),
+        hoverinfo="text",showlegend=False))
+    fig=go.Figure(data=traces)
+    fig.update_layout(showlegend=False,margin=dict(l=0,r=0,t=0,b=0),
+        scene=dict(xaxis=dict(visible=False),yaxis=dict(visible=False),zaxis=dict(visible=False),
+        aspectmode="data"))
+    return fig
+
 def find_multiple_kuratowski_subgraphs(graph):
     """Finds distinct Kuratowski subgraphs by breaking found structures."""
     G_copy = graph.copy()
@@ -153,46 +222,105 @@ def find_multiple_kuratowski_subgraphs(graph):
     return subgraphs
 
 
-def create_app(G=None, title="Graph Planarity Visualization", num_nodes=None, num_edges=None):
+def load_graph_by_id(pdbid,is_topoly):
+    """Load a graph for a PDB id using either the topoly bridge extraction or
+    the pre-simplified CSV/JSON pair. Returns (graph, source_label)."""
+    if is_topoly:
+        return topoly_graph_to_networkx(f'{pdbid.lower()}.pdb', chain='A', bridge_type='all'), 'Topoly'
+    return read_simlified_graph_from_file(f"data/{pdbid}-A_simplified_bonds.csv",
+                                           f"data/{pdbid}-A_simplified.json"), 'Simplified'
+
+def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topoly=False):
     if G is None:
-        G=create_graph()
-    planar,obs=nx.check_planarity(G,counterexample=True)
-    pos=nx.spring_layout(G,seed=1)
-    obs_nodes=set(obs.nodes()) if not planar else set()
-    obs_edges={frozenset(e) for e in obs.edges()} if not planar else set()
-    obs_pos={n:pos[n] for n in obs.nodes()} if not planar else {}
-    multi_subgraphs=find_multiple_kuratowski_subgraphs(G) if not planar else []
+        if pdbid:
+            G,tit=load_graph_by_id(pdbid,is_topoly)
+            title=f"{pdbid}-{tit}"
+        else:
+            G=create_graph()
+
+    # Mutable server-side state so the pdbid/source-switch callback can swap in a
+    # new graph without redeclaring every other callback (Dash apps here are single-user).
+    state={}
+    def recompute(g):
+        planar,obs=nx.check_planarity(g,counterexample=True)
+        pos=nx.spring_layout(g,seed=1)
+        obs_nodes=set(obs.nodes()) if not planar else set()
+        obs_edges={frozenset(e) for e in obs.edges()} if not planar else set()
+        obs_pos={n:pos[n] for n in obs.nodes()} if not planar else {}
+        multi_subgraphs=find_multiple_kuratowski_subgraphs(g) if not planar else []
+        node_pos_3d=get_node_positions_3d(g)
+        state.update(G=g,planar=planar,obs=obs,pos=pos,obs_nodes=obs_nodes,obs_edges=obs_edges,
+                     obs_pos=obs_pos,multi_subgraphs=multi_subgraphs,node_pos_3d=node_pos_3d)
+    recompute(G)
+
+    def make_title(t,g):
+        return f"{t} - Planar: {state['planar']}, Nodes: {g.number_of_nodes()}, Edges: {g.number_of_edges()}"
+
+    GRAPH_BOX_STYLE={"width":"100%","height":"750px"}
+    HIDDEN_STYLE={**GRAPH_BOX_STYLE,"display":"none"}
+    CONTROL_GROUP={"display":"flex","alignItems":"center","gap":"6px"}
 
     app=Dash(__name__)
     app.layout=html.Div([
-    html.H3(f"{title} - Planar: {planar}, Nodes: {num_nodes}, Edges: {num_edges}"),
-    dcc.RadioItems(id="mode",inline=True,value="original",options=[
-    {"label":"Original","value":"original"},
-    {"label":"Highlight obstruction","value":"highlight"},
-    {"label":"Obstruction only","value":"obstruction"},
-    {"label":"Multiple obstructions","value":"multi"}]),
+    html.H3(id="title-text",children=make_title(title,G)),
     html.Div([
-    html.Button("< Prev",id="prev-btn",n_clicks=0),
-    html.Button("Next >",id="next-btn",n_clicks=0),
-    html.Span(id="subgraph-info",style={"marginLeft":"10px"}),
-    ],style={"marginTop":"8px"}),
-    html.Div([
-    html.Label("Color edges by: ",style={"marginRight":"6px"}),
-    dcc.Dropdown(id="edge-color-attr",clearable=False,style={"width":"220px","display":"inline-block"},
-    value="none",
-    options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(G)]),
+        html.Div([
+        dcc.Input(id="pdbid-input",type="text",placeholder="PDB ID",value=pdbid,
+                   style={"width":"90px"},debounce=True),
+        dcc.RadioItems(id="source-type",inline=True,value="topoly" if is_topoly else "simplified",
+        options=[{"label":"Topoly","value":"topoly"},{"label":"Simplified","value":"simplified"}]),
+        html.Button("Load",id="load-btn",n_clicks=0),
+        ],style=CONTROL_GROUP),
+        html.Div([
+        dcc.RadioItems(id="mode",inline=True,value="original",options=[
+        {"label":"Original","value":"original"},
+        {"label":"Highlight obstruction","value":"highlight"},
+        {"label":"Obstruction only","value":"obstruction"},
+        {"label":"Multiple obstructions","value":"multi"}]),
+        ],style=CONTROL_GROUP),
+        html.Div([
+        html.Button("< Prev",id="prev-btn",n_clicks=0),
+        html.Button("Next >",id="next-btn",n_clicks=0),
+        html.Span(id="subgraph-info"),
+        ],style=CONTROL_GROUP),
+        html.Div([
+        html.Label("Color edges by: "),
+        dcc.Dropdown(id="edge-color-attr",clearable=False,style={"width":"180px"},
+        value="none",
+        options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(G)]),
+        ],style=CONTROL_GROUP),
+        html.Div([
+        html.Label("View: "),
+        dcc.RadioItems(id="view-dim",inline=True,value="2d",options=[
+        {"label":"2D","value":"2d"},{"label":"3D","value":"3d"}]),
+        ],style=CONTROL_GROUP),
+    ],style={"display":"flex","flexWrap":"wrap","gap":"20px","alignItems":"center","marginTop":"8px"}),
     html.Div(id="edge-color-legend"),
-    ],style={"marginTop":"8px"}),
+    dcc.Store(id="graph-version",data=0),
     dcc.Store(id="subgraph-index",data=0),
-    cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,
-    style={"width":"100%","height":"750px"})
+    cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,style=GRAPH_BOX_STYLE),
+    dcc.Graph(id="graph-3d",style=HIDDEN_STYLE,config={"displayModeBar":False}),
     ])
+
+    @app.callback(Output("title-text","children"),Output("edge-color-attr","options"),
+    Output("edge-color-attr","value"),Output("mode","value"),
+    Output("subgraph-index","data",allow_duplicate=True),Output("graph-version","data"),
+    Input("load-btn","n_clicks"),Input("pdbid-input","n_submit"),
+    State("pdbid-input","value"),State("source-type","value"),State("graph-version","data"),
+    prevent_initial_call=True)
+    def load_new_graph(n_clicks,n_submit,pdbid_value,source_type,version):
+        if not pdbid_value:
+            raise PreventUpdate
+        g,tit=load_graph_by_id(pdbid_value,source_type=="topoly")
+        recompute(g)
+        options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(g)]
+        return make_title(f"{pdbid_value}-{tit}",g),options,"none","original",0,(version or 0)+1
 
     @app.callback(Output("subgraph-index","data"),
     Input("prev-btn","n_clicks"),Input("next-btn","n_clicks"),
     State("subgraph-index","data"),prevent_initial_call=True)
     def navigate(prev_clicks,next_clicks,idx):
-        n=len(multi_subgraphs)
+        n=len(state['multi_subgraphs'])
         if n==0:
             return 0
         if ctx.triggered_id=="next-btn":
@@ -201,31 +329,64 @@ def create_app(G=None, title="Graph Planarity Visualization", num_nodes=None, nu
 
     @app.callback(Output("subgraph-info","children"),Input("subgraph-index","data"))
     def update_info(idx):
-        n=len(multi_subgraphs)
+        n=len(state['multi_subgraphs'])
         if n==0:
             return "No additional Kuratowski subgraphs found."
         return f"Found {n} Kuratowski subgraph(s) - showing {idx+1} of {n}"
 
     @app.callback(Output("graph","stylesheet"),Output("edge-color-legend","children"),
-    Input("edge-color-attr","value"))
-    def update_edge_colors(attr):
-        stylesheet=BASE_STYLE+edge_color_stylesheet(G,attr)+OBSTRUCTION_STYLE
-        return stylesheet,edge_color_legend(G,attr)
+    Input("edge-color-attr","value"),Input("graph-version","data"))
+    def update_edge_colors(attr,_version):
+        g=state['G']
+        stylesheet=BASE_STYLE+edge_color_stylesheet(g,attr)+OBSTRUCTION_STYLE
+        return stylesheet,edge_color_legend(g,attr)
 
-    @app.callback(Output("graph","elements"),Input("mode","value"),Input("subgraph-index","data"))
-    def update(mode,idx):
+    @app.callback(Output("graph","elements"),
+    Input("mode","value"),Input("subgraph-index","data"),Input("graph-version","data"))
+    def update(mode,idx,_version):
+        g=state['G']
         if mode=="original":
-            return build_elements(G,pos)
+            return build_elements(g,state['pos'])
         if mode=="highlight":
-            return build_elements(G,pos,obs_nodes,obs_edges,True)
+            return build_elements(g,state['pos'],state['obs_nodes'],state['obs_edges'],True)
         if mode=="multi":
+            multi_subgraphs=state['multi_subgraphs']
             if not multi_subgraphs:
-                return build_elements(G,pos)
+                return build_elements(g,state['pos'])
             sub=multi_subgraphs[idx]
             sub_nodes=set(sub.nodes())
             sub_edges={frozenset(e) for e in sub.edges()}
-            return build_elements(G,pos,sub_nodes,sub_edges,True)
-        return build_elements(obs,obs_pos)
+            return build_elements(g,state['pos'],sub_nodes,sub_edges,True)
+        return build_elements(state['obs'],state['obs_pos'])
+
+    @app.callback(Output("graph","style"),Output("graph-3d","style"),Input("view-dim","value"))
+    def toggle_view(view):
+        if view=="3d":
+            return HIDDEN_STYLE,GRAPH_BOX_STYLE
+        return GRAPH_BOX_STYLE,HIDDEN_STYLE
+
+    @app.callback(Output("graph-3d","figure"),
+    Input("mode","value"),Input("subgraph-index","data"),Input("edge-color-attr","value"),
+    Input("graph-version","data"))
+    def update_3d(mode,idx,attr,_version):
+        g=state['G']
+        node_pos_3d=state['node_pos_3d']
+        edge_colors=edge_color_map(g,attr)
+        if mode=="original":
+            return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors)
+        if mode=="highlight":
+            return build_3d_figure(g,node_pos_3d,state['obs_nodes'],state['obs_edges'],True,edge_colors)
+        if mode=="multi":
+            multi_subgraphs=state['multi_subgraphs']
+            if not multi_subgraphs:
+                return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors)
+            sub=multi_subgraphs[idx]
+            sub_nodes=set(sub.nodes())
+            sub_edges={frozenset(e) for e in sub.edges()}
+            return build_3d_figure(g,node_pos_3d,sub_nodes,sub_edges,True,edge_colors)
+        obs=state['obs']
+        obs_pos_3d={n:node_pos_3d[n] for n in obs.nodes()} if not state['planar'] else {}
+        return build_3d_figure(obs,obs_pos_3d,edge_colors=edge_color_map(obs,attr))
     return app
 
 def read_simlified_graph_from_file(file_path, node_list_json=None):
@@ -246,10 +407,15 @@ def read_simlified_graph_from_file(file_path, node_list_json=None):
             parts = line.strip().split(',')
             if len(parts) == 3:
                 t, u, v = parts
-                if atom_list:
-                    u = atom_list.get(int(u), {}).get('auth_residue_id', u)
-                    v = atom_list.get(int(v), {}).get('auth_residue_id', v)
-                G.add_edge(u, v, type=t)
+                u_atom = atom_list.get(int(u)) if atom_list else None
+                v_atom = atom_list.get(int(v)) if atom_list else None
+                u_id = u_atom.get('auth_residue_id', u) if u_atom else u
+                v_id = v_atom.get('auth_residue_id', v) if v_atom else v
+                if u_atom and not G.has_node(u_id):
+                    G.add_node(u_id, coords=(u_atom['x'], u_atom['y'], u_atom['z']))
+                if v_atom and not G.has_node(v_id):
+                    G.add_node(v_id, coords=(v_atom['x'], v_atom['y'], v_atom['z']))
+                G.add_edge(u_id, v_id, type=t)
     return G
 
 
@@ -279,18 +445,5 @@ def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all'):
     return G
 
 if __name__=="__main__":
-    pdbid = "1A8E"
-    is_topoly = True
-    #G = create_graph()
-    #G = topoly_graph_to_networkx("1AOZ.pdb", chain='A', bridge_type='all')
-    if is_topoly:
-        G, tit = topoly_graph_to_networkx(f'{pdbid.lower()}.pdb', chain='A', bridge_type='all'), 'Topoly'
-    else:
-        G, tit = read_simlified_graph_from_file(f"data/{pdbid}-A_simplified_bonds.csv",
-                                                f"data/{pdbid}-A_simplified.json"), 'Simplified'
-    #app = create_app(G, title=f"{pdbid}-Topoly", num_nodes=len(G.nodes()), num_edges=len(G.edges()))
-    #app.run(debug=True, port=8051)
-    print('Nodes: ', sorted([int(n) for n in G.nodes()]))
-    print('Edges: ', sorted([n for n in G.edges()]))
-    app=create_app(G, title=f"{pdbid}-{tit}", num_nodes=len(G.nodes()), num_edges=len(G.edges()))
+    app=create_app(pdbid="1A8E", is_topoly=False)
     app.run(debug=True, port=8050)
