@@ -4,3 +4,5 @@ networkx
 pyvis
 dash-cytoscape
 dash
+ogdf-python
+ogdf-wheel

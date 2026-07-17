@@ -1,4 +1,4 @@
-
+import os
 import random
 import networkx as nx
 from dash import Dash, html, dcc, Input, Output, State, ctx
@@ -6,6 +6,9 @@ from dash.exceptions import PreventUpdate
 import dash_cytoscape as cyto
 import plotly.graph_objects as go
 import topoly as tp
+from ogdf_python import *
+
+
 
 def create_graph(seed=42,n_cliques=5,n_bicliques=6,n_random_edges=10):
     random.seed(seed)
@@ -221,16 +224,66 @@ def find_multiple_kuratowski_subgraphs(graph):
         is_planar, certificate = nx.check_planarity(G_copy, counterexample=True)
         if is_planar:
             break
+        print("Found a Kuratowski subgraph:")
+        nodes = sorted(certificate.nodes(), key=lambda e: int(e))
+        print(f'nodes: {nodes}')
+        edges = sorted(certificate.edges(), key=lambda e: int(e[0]) * 1000 + int(e[1]))
+        print(f'edges: {edges}')
 
+        print("Full graph:")
+        nodes = sorted(G_copy.nodes(), key=lambda e: int(e))
+        print(f'nodes: {nodes}')
+        #edges = sorted(G_copy.edges(), key=lambda e: int(e[0]) * 1000 + int(e[1]))
+        edges = G_copy.edges()
+        print(f'edges: {edges}')
+
+        #for e in certificate.edges():
+        #    print(f'edge: {e}')
         # Save the found subgraph
         subgraphs.append(certificate)
         # Remove an edge from the identified subgraph to force the algorithm
         # to look for a different non-planar structure in the next iteration
+
         edges_to_remove = list(certificate.edges())
         if edges_to_remove:
             G_copy.remove_edge(*edges_to_remove[0])
         else:
             break
+    return subgraphs
+
+
+def find_multiple_kuratowski_subgraphs_ogdf(graph):
+    """Extracts all Kuratowski (K5/K3,3) subdivisions from `graph` using OGDF's
+    Boyer-Myrvold planarity test, which finds them all in a single linear-time pass
+    instead of repeatedly re-running planarity checks like the networkx-only version."""
+    cppinclude("ogdf/planarity/BoyerMyrvold.h")
+
+    G = ogdf.Graph()
+    node_to_ogdf = {}
+    ogdf_index_to_node = {}
+    for node in graph.nodes():
+        onode = G.newNode()
+        node_to_ogdf[node] = onode
+        ogdf_index_to_node[onode.index()] = node
+    for u, v in graph.edges():
+        G.newEdge(node_to_ogdf[u], node_to_ogdf[v])
+
+    bm = ogdf.BoyerMyrvold()
+    kuratowski_list = ogdf.SList[ogdf.KuratowskiWrapper]()
+    # embeddingGrade=-1 (doFindUnlimited) extracts every subdivision instead of
+    # stopping at the first one; avoidE2Minors=True keeps the results unique.
+    is_planar = bm.planarEmbed(G, kuratowski_list, -1, False, False, False, True)
+    if is_planar:
+        return []
+
+    subgraphs = []
+    for wrapper in kuratowski_list:
+        sub = nx.Graph()
+        for e in wrapper.edgeList:
+            u = ogdf_index_to_node[e.source().index()]
+            v = ogdf_index_to_node[e.target().index()]
+            sub.add_edge(u, v)
+        subgraphs.append(sub)
     return subgraphs
 
 
@@ -251,12 +304,16 @@ TOPOLY_REDUCE_OPTIONS=[
 def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL):
     """Load a graph for a PDB id using either the topoly bridge extraction or
     the pre-simplified CSV/JSON pair. Returns (graph, source_label)."""
+    chain = 'A'
+    if len(pdbid)>4:
+        chain = pdbid[4:].strip()
+        pdbid = pdbid[:4]
     if is_topoly:
         #  chain='A',
-        return topoly_graph_to_networkx(f'{pdbid.upper()}.cif', bridge_type='all', reduce=reduce), 'Topoly'
-        #return topoly_graph_to_networkx(f'{pdbid.lower()}.cif', chain='A', bridge_type='all', reduce=reduce), 'Topoly'
-    return read_simlified_graph_from_file(f"data/{pdbid.upper()}-A_simplified_bonds.csv",
-                                           f"data/{pdbid.upper()}-A_simplified.json"), 'Simplified'
+        #return topoly_graph_to_networkx(f'{pdbid.upper()}.cif', chain=chain, bridge_type='all', reduce=reduce), 'Topoly'
+        return topoly_graph_to_networkx(f'{pdbid.upper()}.pdb', chain=chain, bridge_type='all', reduce=reduce), 'Topoly'
+    return read_simlified_graph_from_file(f"data/{pdbid.upper()}-{chain}_simplified_bonds.csv",
+                                           f"data/{pdbid.upper()}-{chain}_simplified.json"), 'Simplified'
 
 def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topoly=False):
     if G is None:
@@ -275,7 +332,10 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         obs_nodes=set(obs.nodes()) if not planar else set()
         obs_edges={frozenset(e) for e in obs.edges()} if not planar else set()
         obs_pos={n:pos[n] for n in obs.nodes()} if not planar else {}
-        multi_subgraphs=find_multiple_kuratowski_subgraphs(g) if not planar else []
+
+        #multi_subgraphs=find_multiple_kuratowski_subgraphs(g) if not planar else []
+        multi_subgraphs = find_multiple_kuratowski_subgraphs_ogdf(g) if not planar else []
+
         node_pos_3d=get_node_positions_3d(g)
         state.update(G=g,planar=planar,obs=obs,pos=pos,obs_nodes=obs_nodes,obs_edges=obs_edges,
                      obs_pos=obs_pos,multi_subgraphs=multi_subgraphs,node_pos_3d=node_pos_3d)
@@ -362,6 +422,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         g,tit=load_graph_by_id(pdbid_value,source_type=="topoly",reduce_value)
         print(f'nodes: {sorted(g.nodes())}')
         print(f'edges: {sorted(g.edges())}')
+        print('--------------------------------------------')
         recompute(g)
         options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(g)]
         return make_title(f"{pdbid_value}-{tit}",g),options,"none","original",0,(version or 0)+1
@@ -514,5 +575,6 @@ def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=To
     return G
 
 if __name__=="__main__":
+    #os.environ['OGDF_INSTALL_DIR'] = '/usr/local'
     app=create_app(pdbid="1A8E", is_topoly=False)
-    app.run(debug=True, port=8050)
+    app.run(debug=True, port=8051)
