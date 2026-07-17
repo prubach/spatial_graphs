@@ -256,31 +256,40 @@ def read_simlified_graph_from_file(file_path, node_list_json=None):
 def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all'):
     g = tp.Graph('data/' + input_file, chain=chain, bridges_type=bridge_type)
     edges = []
-    for n in range(len(g.arcs) - 1):
-        arc = g.arcs[n]
-        #if [arc[0], arc[-1]] not in g.bridges:
-        edges.append([arc[0], arc[-1], 'CA'])
     for br in g.bridges_disulfide:
         edges.append([br[0], br[1], 'disulfide'])
     for br in g.bridges_covalent:
         edges.append([br[0], br[1], 'covalent'])
     for br in g.bridges_ion:
         edges.append([br[0], br[1], 'ion'])
+    for n in range(len(g.arcs) - 1):
+        arc = g.arcs[n]
+        #if [arc[0], arc[-1]] not in g.bridges:
+        edges.append([arc[0], arc[-1], 'CA'])
     print(input_file + ' ' + bridge_type + ": ", end="")
-    print(edges)
+    #print(edges)
+    nodes = set(e for edge in edges for e in edge[:2])
     G = nx.Graph()
+    coords_list = g.get_coords()
+    coords_dict = { coords_list[i][0]: coords_list[i][1:] for i in range(len(coords_list))}
+    for n in nodes:
+        G.add_node(f'{n}', coords=coords_dict.get(n))
     for edge in edges:
         G.add_edge(f'{edge[0]}', f'{edge[1]}', weight=5 if edge[2] == 'CA' else 1, type=edge[2])
     return G
 
 if __name__=="__main__":
     pdbid = "1A8E"
+    is_topoly = True
     #G = create_graph()
     #G = topoly_graph_to_networkx("1AOZ.pdb", chain='A', bridge_type='all')
-    #G, tit = topoly_graph_to_networkx(f'{pdbid.lower()}.pdb', chain='A', bridge_type='all'), 'Topoly'
+    if is_topoly:
+        G, tit = topoly_graph_to_networkx(f'{pdbid.lower()}.pdb', chain='A', bridge_type='all'), 'Topoly'
+    else:
+        G, tit = read_simlified_graph_from_file(f"data/{pdbid}-A_simplified_bonds.csv",
+                                                f"data/{pdbid}-A_simplified.json"), 'Simplified'
     #app = create_app(G, title=f"{pdbid}-Topoly", num_nodes=len(G.nodes()), num_edges=len(G.edges()))
     #app.run(debug=True, port=8051)
-    G, tit = read_simlified_graph_from_file(f"data/{pdbid}-A_simplified_bonds.csv", f"data/{pdbid}-A_simplified.json"), 'Simplified'
     print('Nodes: ', sorted([int(n) for n in G.nodes()]))
     print('Edges: ', sorted([n for n in G.edges()]))
     app=create_app(G, title=f"{pdbid}-{tit}", num_nodes=len(G.nodes()), num_edges=len(G.edges()))
