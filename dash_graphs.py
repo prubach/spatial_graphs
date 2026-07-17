@@ -62,15 +62,22 @@ BASE_STYLE=[
     "text-halign": "center",
     "font-size": "20px",
 }},
-{"selector":"edge","style":{"line-color":"#999","width":2}},
+{"selector":"edge","style":{"line-color":"#999","width":5}},
 ]
 OBSTRUCTION_STYLE=[
 {"selector":".obstruction","style":{"background-color":"crimson","line-color":"crimson","border-width":4,"border-color":"gold",
                                     "width":60,"height":60,}},
 {"selector":"edge.obstruction","style":{"background-color":"crimson","line-color":"crimson","border-width":4,"border-color":"gold",
-                                    "width":10}},
+                                    "width":16}},
 ]
 STYLE=BASE_STYLE+OBSTRUCTION_STYLE
+
+# CSS grid background, toggled behind the 2D/3D graph views.
+GRID_BACKGROUND={
+    "backgroundImage":"linear-gradient(to right, #ddd 1px, transparent 1px),"
+                       "linear-gradient(to bottom, #ddd 1px, transparent 1px)",
+    "backgroundSize":"25px 25px",
+}
 
 # Sequential blue ramp (light -> dark) for continuous edge attributes such as weight.
 SEQUENTIAL_LOW="#cde2fb"
@@ -161,7 +168,7 @@ def get_node_positions_3d(graph,seed=1):
         return {n:tuple(graph.nodes[n]['coords']) for n in graph.nodes()}
     return nx.spring_layout(graph,dim=3,seed=seed)
 
-def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=False,edge_colors=None):
+def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=False,edge_colors=None,show_grid=False):
     edge_colors=edge_colors or {}
     by_color={}
     for u,v in graph.edges():
@@ -175,7 +182,7 @@ def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=Fal
             x0,y0,z0=node_pos[u]; x1,y1,z1=node_pos[v]
             xs+=[x0,x1,None]; ys+=[y0,y1,None]; zs+=[z0,z1,None]
         traces.append(go.Scatter3d(x=xs,y=ys,z=zs,mode="lines",
-            line=dict(color=color,width=3),hoverinfo="none",showlegend=False))
+            line=dict(color=color,width=5),hoverinfo="none",showlegend=False))
     if highlight and obs_edges:
         xs,ys,zs=[],[],[]
         for u,v in graph.edges():
@@ -183,7 +190,7 @@ def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=Fal
                 x0,y0,z0=node_pos[u]; x1,y1,z1=node_pos[v]
                 xs+=[x0,x1,None]; ys+=[y0,y1,None]; zs+=[z0,z1,None]
         traces.append(go.Scatter3d(x=xs,y=ys,z=zs,mode="lines",
-            line=dict(color="crimson",width=8),hoverinfo="none",showlegend=False))
+            line=dict(color="crimson",width=12),hoverinfo="none",showlegend=False))
     node_x,node_y,node_z,node_color,node_text=[],[],[],[],[]
     for n in graph.nodes():
         x,y,z=node_pos[n]
@@ -195,8 +202,13 @@ def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=Fal
         marker=dict(size=6,color=node_color,line=dict(width=1,color="white")),
         hoverinfo="text",showlegend=False))
     fig=go.Figure(data=traces)
+    if show_grid:
+        axis_cfg=dict(visible=True,showgrid=True,gridcolor="#ccc",showticklabels=False,title="",
+                      zeroline=False,showbackground=True,backgroundcolor="#f2f2f2")
+    else:
+        axis_cfg=dict(visible=False)
     fig.update_layout(showlegend=False,margin=dict(l=0,r=0,t=0,b=0),
-        scene=dict(xaxis=dict(visible=False),yaxis=dict(visible=False),zaxis=dict(visible=False),
+        scene=dict(xaxis=axis_cfg,yaxis=axis_cfg,zaxis=axis_cfg,
         aspectmode="data"))
     return fig
 
@@ -222,11 +234,25 @@ def find_multiple_kuratowski_subgraphs(graph):
     return subgraphs
 
 
-def load_graph_by_id(pdbid,is_topoly):
+class TopolyReduce:
+    """
+    Type of Topoly reduction.
+    """
+    NO = 0
+    INTERNAL = 1
+    FULL = 2
+
+TOPOLY_REDUCE_OPTIONS=[
+    {"label":"None","value":TopolyReduce.NO},
+    {"label":"Internal","value":TopolyReduce.INTERNAL},
+    {"label":"Full","value":TopolyReduce.FULL},
+]
+
+def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL):
     """Load a graph for a PDB id using either the topoly bridge extraction or
     the pre-simplified CSV/JSON pair. Returns (graph, source_label)."""
     if is_topoly:
-        return topoly_graph_to_networkx(f'{pdbid.lower()}.pdb', chain='A', bridge_type='all'), 'Topoly'
+        return topoly_graph_to_networkx(f'{pdbid.lower()}.pdb', chain='A', bridge_type='all', reduce=reduce), 'Topoly'
     return read_simlified_graph_from_file(f"data/{pdbid}-A_simplified_bonds.csv",
                                            f"data/{pdbid}-A_simplified.json"), 'Simplified'
 
@@ -257,8 +283,15 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         return f"{t} - Planar: {state['planar']}, Nodes: {g.number_of_nodes()}, Edges: {g.number_of_edges()}"
 
     GRAPH_BOX_STYLE={"width":"100%","height":"750px"}
-    HIDDEN_STYLE={**GRAPH_BOX_STYLE,"display":"none"}
     CONTROL_GROUP={"display":"flex","alignItems":"center","gap":"6px"}
+
+    def container_style(hidden,grid):
+        style={**GRAPH_BOX_STYLE}
+        if grid:
+            style.update(GRID_BACKGROUND)
+        if hidden:
+            style["display"]="none"
+        return style
 
     app=Dash(__name__)
     app.layout=html.Div([
@@ -269,6 +302,11 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                    style={"width":"90px"},debounce=True),
         dcc.RadioItems(id="source-type",inline=True,value="topoly" if is_topoly else "simplified",
         options=[{"label":"Topoly","value":"topoly"},{"label":"Simplified","value":"simplified"}]),
+        html.Div([
+        html.Label("Reduction: "),
+        dcc.Dropdown(id="topoly-reduce",clearable=False,style={"width":"110px"},
+        value=TopolyReduce.INTERNAL,options=TOPOLY_REDUCE_OPTIONS),
+        ],id="topoly-reduce-container",style={**CONTROL_GROUP,"display":"flex" if is_topoly else "none"}),
         html.Button("Load",id="load-btn",n_clicks=0),
         ],style=CONTROL_GROUP),
         html.Div([
@@ -294,24 +332,32 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         dcc.RadioItems(id="view-dim",inline=True,value="2d",options=[
         {"label":"2D","value":"2d"},{"label":"3D","value":"3d"}]),
         ],style=CONTROL_GROUP),
+        html.Div([
+        dcc.Checklist(id="show-grid",options=[{"label":"Show grid","value":"grid"}],value=[]),
+        ],style=CONTROL_GROUP),
     ],style={"display":"flex","flexWrap":"wrap","gap":"20px","alignItems":"center","marginTop":"8px"}),
     html.Div(id="edge-color-legend"),
     dcc.Store(id="graph-version",data=0),
     dcc.Store(id="subgraph-index",data=0),
-    cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,style=GRAPH_BOX_STYLE),
-    dcc.Graph(id="graph-3d",style=HIDDEN_STYLE,config={"displayModeBar":False}),
+    cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,style=container_style(False,False)),
+    dcc.Graph(id="graph-3d",style=container_style(True,False),config={"displayModeBar":False}),
     ])
+
+    @app.callback(Output("topoly-reduce-container","style"),Input("source-type","value"))
+    def toggle_topoly_reduce(source_type):
+        return {**CONTROL_GROUP,"display":"flex" if source_type=="topoly" else "none"}
 
     @app.callback(Output("title-text","children"),Output("edge-color-attr","options"),
     Output("edge-color-attr","value"),Output("mode","value"),
     Output("subgraph-index","data",allow_duplicate=True),Output("graph-version","data"),
     Input("load-btn","n_clicks"),Input("pdbid-input","n_submit"),
-    State("pdbid-input","value"),State("source-type","value"),State("graph-version","data"),
+    State("pdbid-input","value"),State("source-type","value"),State("topoly-reduce","value"),
+    State("graph-version","data"),
     prevent_initial_call=True)
-    def load_new_graph(n_clicks,n_submit,pdbid_value,source_type,version):
+    def load_new_graph(n_clicks,n_submit,pdbid_value,source_type,reduce_value,version):
         if not pdbid_value:
             raise PreventUpdate
-        g,tit=load_graph_by_id(pdbid_value,source_type=="topoly")
+        g,tit=load_graph_by_id(pdbid_value,source_type=="topoly",reduce_value)
         recompute(g)
         options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(g)]
         return make_title(f"{pdbid_value}-{tit}",g),options,"none","original",0,(version or 0)+1
@@ -359,34 +405,37 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             return build_elements(g,state['pos'],sub_nodes,sub_edges,True)
         return build_elements(state['obs'],state['obs_pos'])
 
-    @app.callback(Output("graph","style"),Output("graph-3d","style"),Input("view-dim","value"))
-    def toggle_view(view):
+    @app.callback(Output("graph","style"),Output("graph-3d","style"),
+    Input("view-dim","value"),Input("show-grid","value"))
+    def toggle_view(view,grid_value):
+        grid="grid" in (grid_value or [])
         if view=="3d":
-            return HIDDEN_STYLE,GRAPH_BOX_STYLE
-        return GRAPH_BOX_STYLE,HIDDEN_STYLE
+            return container_style(True,grid),container_style(False,grid)
+        return container_style(False,grid),container_style(True,grid)
 
     @app.callback(Output("graph-3d","figure"),
     Input("mode","value"),Input("subgraph-index","data"),Input("edge-color-attr","value"),
-    Input("graph-version","data"))
-    def update_3d(mode,idx,attr,_version):
+    Input("graph-version","data"),Input("show-grid","value"))
+    def update_3d(mode,idx,attr,_version,grid_value):
         g=state['G']
         node_pos_3d=state['node_pos_3d']
         edge_colors=edge_color_map(g,attr)
+        show_grid="grid" in (grid_value or [])
         if mode=="original":
-            return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors)
+            return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid)
         if mode=="highlight":
-            return build_3d_figure(g,node_pos_3d,state['obs_nodes'],state['obs_edges'],True,edge_colors)
+            return build_3d_figure(g,node_pos_3d,state['obs_nodes'],state['obs_edges'],True,edge_colors,show_grid)
         if mode=="multi":
             multi_subgraphs=state['multi_subgraphs']
             if not multi_subgraphs:
-                return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors)
+                return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid)
             sub=multi_subgraphs[idx]
             sub_nodes=set(sub.nodes())
             sub_edges={frozenset(e) for e in sub.edges()}
-            return build_3d_figure(g,node_pos_3d,sub_nodes,sub_edges,True,edge_colors)
+            return build_3d_figure(g,node_pos_3d,sub_nodes,sub_edges,True,edge_colors,show_grid)
         obs=state['obs']
         obs_pos_3d={n:node_pos_3d[n] for n in obs.nodes()} if not state['planar'] else {}
-        return build_3d_figure(obs,obs_pos_3d,edge_colors=edge_color_map(obs,attr))
+        return build_3d_figure(obs,obs_pos_3d,edge_colors=edge_color_map(obs,attr),show_grid=show_grid)
     return app
 
 def read_simlified_graph_from_file(file_path, node_list_json=None):
@@ -419,25 +468,41 @@ def read_simlified_graph_from_file(file_path, node_list_json=None):
     return G
 
 
-def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all'):
+def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=TopolyReduce.FULL):
     g = tp.Graph('data/' + input_file, chain=chain, bridges_type=bridge_type)
+    if reduce == TopolyReduce.INTERNAL:
+        g.reduce()
     edges = []
-    for br in g.bridges_disulfide:
-        edges.append([br[0], br[1], 'disulfide'])
-    for br in g.bridges_covalent:
-        edges.append([br[0], br[1], 'covalent'])
-    for br in g.bridges_ion:
-        edges.append([br[0], br[1], 'ion'])
-    for n in range(len(g.arcs) - 1):
-        arc = g.arcs[n]
-        #if [arc[0], arc[-1]] not in g.bridges:
-        edges.append([arc[0], arc[-1], 'CA'])
-    print(input_file + ' ' + bridge_type + ": ", end="")
-    #print(edges)
-    nodes = set(e for edge in edges for e in edge[:2])
+    if hasattr(g, 'bridges_disulfide'):
+        for br in g.bridges_disulfide:
+            edges.append([br[0], br[1], 'disulfide'])
+    if hasattr(g, 'bridges_covalent'):
+        for br in g.bridges_covalent:
+            edges.append([br[0], br[1], 'covalent'])
+    if hasattr(g, 'bridges_ion'):
+        for br in g.bridges_ion:
+            edges.append([br[0], br[1], 'ion'])
+    else:
+        for br in g.bridges:
+            edges.append([br[0], br[1], 'bridge'])
+
+    if reduce == TopolyReduce.FULL:
+        for n in range(len(g.arcs) - 1):
+            arc = g.arcs[n]
+            if [arc[0], arc[-1]] not in g.bridges:
+                edges.append([arc[0], arc[-1], 'CA'])
+    else:
+        for arc in g.arcs:
+            if [arc[0], arc[-1]] not in g.bridges:
+                for n in range(len(arc) - 1):
+                    edges.append([arc[n], arc[n + 1], 'CA'])
+            #edges.append([arc[0], arc[-1], 'CA'])
+    #print(input_file + ' ' + bridge_type + ": ", end="")
+
     G = nx.Graph()
     coords_list = g.get_coords()
     coords_dict = { coords_list[i][0]: coords_list[i][1:] for i in range(len(coords_list))}
+    nodes = set(e for edge in edges for e in edge[:2])
     for n in nodes:
         G.add_node(f'{n}', coords=coords_dict.get(n))
     for edge in edges:
