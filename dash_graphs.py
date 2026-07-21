@@ -311,7 +311,11 @@ def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL):
     if is_topoly:
         #  chain='A',
         #return topoly_graph_to_networkx(f'{pdbid.upper()}.cif', chain=chain, bridge_type='all', reduce=reduce), 'Topoly'
-        return topoly_graph_to_networkx(f'{pdbid.upper()}.pdb', chain=chain, bridge_type='all', reduce=reduce), 'Topoly'
+        G_pdb = topoly_graph_to_networkx(f'{pdbid.upper()}.pdb', chain=chain, bridge_type='all', reduce=reduce), 'Topoly'
+        #print(G_pdb.nodes)
+        G_cif = topoly_graph_to_networkx(f'{pdbid.upper()}.cif', chain=chain, bridge_type='all', reduce=reduce), 'Topoly'
+        #print(G_cif.nodes)
+        return G_cif
     return read_simlified_graph_from_file(f"data/{pdbid.upper()}-{chain}_simplified_bonds.csv",
                                            f"data/{pdbid.upper()}-{chain}_simplified.json"), 'Simplified'
 
@@ -562,12 +566,13 @@ def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=To
                 for n in range(len(arc) - 1):
                     edges.append([arc[n], arc[n + 1], 'CA'])
             #edges.append([arc[0], arc[-1], 'CA'])
-    #print(input_file + ' ' + bridge_type + ": ", end="")
-
+    print(input_file + ' ' + bridge_type + ": ", end="")
+    print(g.arcs)
     G = nx.Graph()
     coords_list = g.get_coords()
     coords_dict = { coords_list[i][0]: coords_list[i][1:] for i in range(len(coords_list))}
     nodes = set(e for edge in edges for e in edge[:2])
+    print(sorted(list(nodes)))
     for n in nodes:
         G.add_node(f'{n}', coords=coords_dict.get(n))
     for edge in edges:
