@@ -192,6 +192,10 @@ def get_node_positions_3d(graph,seed=1):
         return {n:tuple(graph.nodes[n]['coords']) for n in graph.nodes()}
     return nx.spring_layout(graph,dim=3,seed=seed)
 
+EDGE_THICKNESS_VALUES=[0.1,0.25,0.5,1,2,3,4,5]
+
+NODE_FONT_SIZES=[8,10,12,14,16,18,20,24,28,32]
+
 def tube_mesh(edges,node_pos,color,radius,sides=8):
     """Shaded cylinders for the edges, so that overlapping edges are occluded properly and
     their relative depth is visible."""
@@ -222,7 +226,7 @@ def tube_mesh(edges,node_pos,color,radius,sides=8):
         flatshading=False,lighting=dict(ambient=0.45,diffuse=0.8,specular=0.3,roughness=0.5),
         hoverinfo="none",showlegend=False)
 
-def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=False,edge_colors=None,show_grid=False,thickness=1.0):
+def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=False,edge_colors=None,show_grid=False,thickness=1.0,font_size=18):
     edge_colors=edge_colors or {}
     by_color={}
     for u,v in graph.edges():
@@ -245,7 +249,7 @@ def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=Fal
         node_color.append("crimson" if highlight and n in obs_nodes else "#1976d2")
         node_text.append(str(n))
     traces.append(go.Scatter3d(x=node_x,y=node_y,z=node_z,mode="markers+text",
-        text=node_text,textposition="top center",textfont=dict(size=18,color="#111"),
+        text=node_text,textposition="top center",textfont=dict(size=font_size,color="#111"),
         marker=dict(size=6,color=node_color,line=dict(width=1,color="white")),
         hoverinfo="text",showlegend=False))
     fig=go.Figure(data=traces)
@@ -443,66 +447,93 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         return style
 
     app=Dash(__name__, requests_pathname_prefix=_path_prefix(), routes_pathname_prefix=_path_prefix())
+    FONT="'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+    PANEL={"background":"#f4f7fb","border":"1px solid #d5deea","borderRadius":"10px","padding":"10px 14px",
+           "display":"flex","flexDirection":"column","gap":"8px","minWidth":"230px","flex":"1 1 230px"}
+    PANEL_TITLE={"fontWeight":"600","fontSize":"12px","letterSpacing":"0.06em","textTransform":"uppercase",
+                 "color":"#1565c0","borderBottom":"2px solid #1976d2","paddingBottom":"3px"}
+    ROW={"display":"flex","alignItems":"center","gap":"8px","flexWrap":"wrap"}
+    LABEL={"fontSize":"13px","color":"#37474f","minWidth":"70px"}
+    BTN={"background":"#e3eefb","color":"#0d47a1","border":"1px solid #90b4e0","borderRadius":"6px",
+         "padding":"5px 12px","cursor":"pointer"}
+    BTN_PRIMARY={**BTN,"background":"#1976d2","color":"white","border":"1px solid #1565c0","fontWeight":"600"}
+    OPT={"marginRight":"12px","fontSize":"13px"}
+
+    def panel(title,*rows):
+        return html.Div([html.Div(title,style=PANEL_TITLE),*rows],style=PANEL)
+
+    THICKNESS_VALUES=EDGE_THICKNESS_VALUES
     app.layout=html.Div([
-    html.H3(id="title-text",children=make_title(title,G)),
+    html.H3(id="title-text",children=make_title(title,G),
+            style={"margin":"6px 0","color":"#0d47a1","fontWeight":"600"}),
     html.Div([
+        panel("Data",
         html.Div([
         dcc.Dropdown(id="pdbid-input",placeholder="PDB ID",value=pdbid or None,clearable=False,
                    options=[{"label":p,"value":p} for p in list(dict.fromkeys(list_data_pdbids()+([pdbid] if pdbid else [])))],
                    style={"width":"130px"}),
         dcc.RadioItems(id="source-type",inline=True,value="topoly" if is_topoly else "simplified",
-        options=[{"label":"Topoly","value":"topoly"},{"label":"Simplified","value":"simplified"}]),
+        options=[{"label":"Topoly","value":"topoly"},{"label":"Simplified","value":"simplified"}],
+        labelStyle=OPT),
+        ],style=ROW),
         html.Div([
-        html.Label("Reduction: "),
+        html.Label("Reduction",style=LABEL),
         dcc.Dropdown(id="topoly-reduce",clearable=False,style={"width":"110px"},
         value=TopolyReduce.INTERNAL,options=TOPOLY_REDUCE_OPTIONS),
-        html.Label("Numbering: "),
+        html.Label("Numbering",style=LABEL),
         dcc.RadioItems(id="topoly-numbering",inline=True,value="auth",options=[
-        {"label":"Label","value":"label"},{"label":"Auth","value":"auth"}]),
-        ],id="topoly-reduce-container",style={**CONTROL_GROUP,"display":"flex" if is_topoly else "none"}),
-        dcc.Checklist(id="merge-residues",options=[{"label":"Merge residue edges","value":"on"}],value=[]),
-        html.Button("Load",id="load-btn",n_clicks=0),
-        ],style=CONTROL_GROUP),
+        {"label":"Label","value":"label"},{"label":"Auth","value":"auth"}],labelStyle=OPT),
+        ],id="topoly-reduce-container",style={**ROW,"display":"flex" if is_topoly else "none"}),
         html.Div([
+        dcc.Checklist(id="merge-residues",options=[{"label":"Merge residue edges","value":"on"}],value=[],labelStyle=OPT),
+        html.Button("Load",id="load-btn",n_clicks=0,style=BTN_PRIMARY),
+        ],style=ROW)),
+        panel("Obstruction",
         dcc.RadioItems(id="mode",inline=True,value="original",options=[
         {"label":"Original","value":"original"},
         {"label":"Highlight obstruction","value":"highlight"},
         {"label":"Obstruction only","value":"obstruction"},
-        {"label":"Multiple obstructions","value":"multi"}]),
-        ],style=CONTROL_GROUP),
+        {"label":"Multiple obstructions","value":"multi"}],labelStyle=OPT),
         html.Div([
-        html.Button("< Prev",id="prev-btn",n_clicks=0),
-        html.Button("Next >",id="next-btn",n_clicks=0),
-        html.Span(id="subgraph-info"),
-        ],style=CONTROL_GROUP),
+        html.Button("< Prev",id="prev-btn",n_clicks=0,style=BTN),
+        html.Button("Next >",id="next-btn",n_clicks=0,style=BTN),
+        html.Span(id="subgraph-info",style={"fontSize":"13px","color":"#37474f"}),
+        ],style=ROW)),
+        panel("Appearance",
         html.Div([
-        html.Label("Color edges by: "),
-        dcc.Dropdown(id="edge-color-attr",clearable=False,style={"width":"180px"},
+        html.Label("View",style=LABEL),
+        dcc.RadioItems(id="view-dim",inline=True,value="3d",options=[
+        {"label":"2D","value":"2d"},{"label":"3D","value":"3d"}],labelStyle=OPT),
+        dcc.Checklist(id="show-grid",options=[{"label":"Show grid","value":"grid"}],value=["grid"],labelStyle=OPT),
+        ],style=ROW),
+        html.Div([
+        html.Label("Color edges by",style=LABEL),
+        dcc.Dropdown(id="edge-color-attr",clearable=False,style={"width":"150px"},
         value="type" if "type" in edge_attr_keys(G) else "none",
         options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(G)]),
-        ],style=CONTROL_GROUP),
+        dcc.Checklist(id="rainbow-backbone",options=[{"label":"Rainbow backbone","value":"on"}],value=[],labelStyle=OPT),
+        ],style=ROW),
         html.Div([
-        html.Label("View: "),
-        dcc.RadioItems(id="view-dim",inline=True,value="3d",options=[
-        {"label":"2D","value":"2d"},{"label":"3D","value":"3d"}]),
-        ],style=CONTROL_GROUP),
+        html.Label("Label font size",style=LABEL),
+        dcc.Dropdown(id="node-font-size",clearable=False,style={"width":"90px"},value=18,
+                     options=[{"label":str(v),"value":v} for v in NODE_FONT_SIZES]),
+        ],style=ROW),
         html.Div([
-        dcc.Checklist(id="show-grid",options=[{"label":"Show grid","value":"grid"}],value=["grid"]),
-        dcc.Checklist(id="rainbow-backbone",options=[{"label":"Rainbow backbone","value":"on"}],value=[]),
-        html.Div([html.Label("Edge thickness: "),
-        html.Div(dcc.Slider(id="edge-thickness",min=0.5,max=5,step=0.5,value=1,
-                            marks={0.5:"0.5",1:"1",2:"2",3:"3",4:"4",5:"5"}),style={"width":"220px"}),
-        ],style=CONTROL_GROUP),
-        html.Button("Export 3D to HTML",id="export-3d-btn",n_clicks=0),
-        dcc.Download(id="export-3d-download"),
-        ],style=CONTROL_GROUP),
-    ],style={"display":"flex","flexWrap":"wrap","gap":"20px","alignItems":"center","marginTop":"8px"}),
-    html.Div(id="edge-color-legend"),
+        html.Label("Edge thickness",style=LABEL),
+        html.Div(dcc.Slider(id="edge-thickness",min=0,max=len(THICKNESS_VALUES)-1,step=1,value=THICKNESS_VALUES.index(1),
+                            marks={i:str(v) for i,v in enumerate(THICKNESS_VALUES)},included=False),
+                 style={"width":"260px","paddingBottom":"6px"}),
+        ],style=ROW)),
+        panel("Export",
+        html.Button("Export 3D to HTML",id="export-3d-btn",n_clicks=0,style=BTN),
+        dcc.Download(id="export-3d-download")),
+    ],style={"display":"flex","flexWrap":"wrap","gap":"12px","alignItems":"stretch","marginTop":"8px"}),
+    html.Div(id="edge-color-legend",style={"margin":"8px 0"}),
     dcc.Store(id="graph-version",data=0),
     dcc.Store(id="subgraph-index",data=0),
     cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,style=container_style(False,False)),
     dcc.Graph(id="graph-3d",style=container_style(True,False),config={"displayModeBar":False}),
-    ])
+    ],style={"fontFamily":FONT,"padding":"8px 14px"})
 
     @app.callback(Output("topoly-reduce-container","style"),Input("source-type","value"))
     def toggle_topoly_reduce(source_type):
@@ -545,13 +576,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         return f"Found {n} Kuratowski subgraph(s) - showing {idx+1} of {n}"
 
     @app.callback(Output("graph","stylesheet"),Output("edge-color-legend","children"),
-    Input("edge-color-attr","value"),Input("graph-version","data"),Input("rainbow-backbone","value"))
-    def update_edge_colors(attr,_version,rainbow):
+    Input("edge-color-attr","value"),Input("graph-version","data"),Input("rainbow-backbone","value"),Input("node-font-size","value"))
+    def update_edge_colors(attr,_version,rainbow,font_size):
         g=state['G']
         rainbow_rules=[{"selector":f'edge[source = "{u}"][target = "{v}"]',"style":{"line-color":c}}
                        for (u,v),c in ((tuple(e),c) for e,c in rainbow_backbone_map(g).items())] if rainbow else []
         rainbow_rules+=[{"selector":f'edge[source = "{v}"][target = "{u}"]',"style":r["style"]} for r in rainbow_rules for u,v in [(r["selector"].split('"')[3],r["selector"].split('"')[1])]]
-        stylesheet=BASE_STYLE+edge_color_stylesheet(g,attr)+rainbow_rules+OBSTRUCTION_STYLE
+        stylesheet=BASE_STYLE+[{"selector":"node","style":{"font-size":f"{font_size or 18}px"}}]+edge_color_stylesheet(g,attr)+rainbow_rules+OBSTRUCTION_STYLE
         return stylesheet,edge_color_legend(g,attr)
 
     @app.callback(Output("graph","elements"),
@@ -594,29 +625,30 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     @app.callback(Output("graph-3d","figure"),
     Input("mode","value"),Input("subgraph-index","data"),Input("edge-color-attr","value"),
     Input("graph-version","data"),Input("show-grid","value"),
-    Input("rainbow-backbone","value"),Input("edge-thickness","value"))
-    def update_3d(mode,idx,attr,_version,grid_value,rainbow,thickness):
+    Input("rainbow-backbone","value"),Input("edge-thickness","value"),Input("node-font-size","value"))
+    def update_3d(mode,idx,attr,_version,grid_value,rainbow,thickness,font_size):
+        font_size=font_size or 18
         g=state['G']
         node_pos_3d=state['node_pos_3d']
-        thickness=thickness or 1.0
+        thickness=EDGE_THICKNESS_VALUES[thickness] if thickness is not None else 1.0
         rainbow_colors=rainbow_backbone_map(g) if rainbow else {}
         edge_colors={**edge_color_map(g,attr),**rainbow_colors}
         show_grid="grid" in (grid_value or [])
         if mode=="original":
-            return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid,thickness=thickness)
+            return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid,thickness=thickness,font_size=font_size)
         if mode=="highlight":
-            return build_3d_figure(g,node_pos_3d,state['obs_nodes'],state['obs_edges'],True,edge_colors,show_grid,thickness)
+            return build_3d_figure(g,node_pos_3d,state['obs_nodes'],state['obs_edges'],True,edge_colors,show_grid,thickness,font_size)
         if mode=="multi":
             multi_subgraphs=state['multi_subgraphs']
             if not multi_subgraphs:
-                return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid,thickness=thickness)
+                return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid,thickness=thickness,font_size=font_size)
             sub=multi_subgraphs[idx]
             sub_nodes=set(sub.nodes())
             sub_edges={frozenset(e) for e in sub.edges()}
-            return build_3d_figure(g,node_pos_3d,sub_nodes,sub_edges,True,edge_colors,show_grid,thickness)
+            return build_3d_figure(g,node_pos_3d,sub_nodes,sub_edges,True,edge_colors,show_grid,thickness,font_size)
         obs=state['obs']
         obs_pos_3d={n:node_pos_3d[n] for n in obs.nodes()} if not state['planar'] else {}
-        return build_3d_figure(obs,obs_pos_3d,edge_colors={**edge_color_map(obs,attr),**rainbow_colors},show_grid=show_grid,thickness=thickness)
+        return build_3d_figure(obs,obs_pos_3d,edge_colors={**edge_color_map(obs,attr),**rainbow_colors},show_grid=show_grid,thickness=thickness,font_size=font_size)
     return app
 
 SIMPLIFIED_BOND_TYPES={'disulf':'disulfide','metalc':'ion'}
