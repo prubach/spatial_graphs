@@ -359,7 +359,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             style["display"]="none"
         return style
 
-    app=Dash(__name__)
+    app=Dash(__name__, requests_pathname_prefix=_path_prefix(), routes_pathname_prefix=_path_prefix())
     app.layout=html.Div([
     html.H3(id="title-text",children=make_title(title,G)),
     html.Div([
@@ -579,7 +579,12 @@ def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=To
         G.add_edge(f'{edge[0]}', f'{edge[1]}', weight=5 if edge[2] == 'CA' else 1, type=edge[2])
     return G
 
+def _path_prefix():
+    """Return the URL prefix from CONTEXT_PATH env var (default: 'spatialgraph'); empty value means root."""
+    ctx = os.environ.get("CONTEXT_PATH", "spatialgraph").strip("/")
+    return f"/{ctx}/" if ctx else "/"
+
 if __name__=="__main__":
     #os.environ['OGDF_INSTALL_DIR'] = '/usr/local'
     app=create_app(pdbid="1A8E", is_topoly=False)
-    app.run(debug=True, port=8051)
+    app.run(debug=True, port=8014)
