@@ -301,7 +301,7 @@ TOPOLY_REDUCE_OPTIONS=[
     {"label":"Full","value":TopolyReduce.FULL},
 ]
 
-def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL,numbering='label'):
+def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL,numbering='auth'):
     """Load a graph for a PDB id using either the topoly bridge extraction or
     the pre-simplified CSV/JSON pair. Returns (graph, source_label)."""
     chain = 'A'
@@ -373,7 +373,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         dcc.Dropdown(id="topoly-reduce",clearable=False,style={"width":"110px"},
         value=TopolyReduce.INTERNAL,options=TOPOLY_REDUCE_OPTIONS),
         html.Label("Numbering: "),
-        dcc.RadioItems(id="topoly-numbering",inline=True,value="label",options=[
+        dcc.RadioItems(id="topoly-numbering",inline=True,value="auth",options=[
         {"label":"Label","value":"label"},{"label":"Auth","value":"auth"}]),
         ],id="topoly-reduce-container",style={**CONTROL_GROUP,"display":"flex" if is_topoly else "none"}),
         html.Button("Load",id="load-btn",n_clicks=0),
@@ -393,16 +393,16 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Div([
         html.Label("Color edges by: "),
         dcc.Dropdown(id="edge-color-attr",clearable=False,style={"width":"180px"},
-        value="none",
+        value="type" if "type" in edge_attr_keys(G) else "none",
         options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(G)]),
         ],style=CONTROL_GROUP),
         html.Div([
         html.Label("View: "),
-        dcc.RadioItems(id="view-dim",inline=True,value="2d",options=[
+        dcc.RadioItems(id="view-dim",inline=True,value="3d",options=[
         {"label":"2D","value":"2d"},{"label":"3D","value":"3d"}]),
         ],style=CONTROL_GROUP),
         html.Div([
-        dcc.Checklist(id="show-grid",options=[{"label":"Show grid","value":"grid"}],value=[]),
+        dcc.Checklist(id="show-grid",options=[{"label":"Show grid","value":"grid"}],value=["grid"]),
         ],style=CONTROL_GROUP),
     ],style={"display":"flex","flexWrap":"wrap","gap":"20px","alignItems":"center","marginTop":"8px"}),
     html.Div(id="edge-color-legend"),
@@ -432,7 +432,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         print('--------------------------------------------')
         recompute(g)
         options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(g)]
-        return make_title(f"{pdbid_value}-{tit}",g),options,"none","original",0,(version or 0)+1
+        return make_title(f"{pdbid_value}-{tit}",g),options,"type" if "type" in edge_attr_keys(g) else "none","original",0,(version or 0)+1
 
     @app.callback(Output("subgraph-index","data"),
     Input("prev-btn","n_clicks"),Input("next-btn","n_clicks"),
@@ -566,7 +566,7 @@ def cif_label_to_auth(path, chain):
     return mapping
 
 
-def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=TopolyReduce.FULL, numbering='label'):
+def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=TopolyReduce.FULL, numbering='auth'):
     init_data = init_data_path = 'data/' + input_file
     kwargs = {}
     if input_file.lower().endswith('.cif'):
