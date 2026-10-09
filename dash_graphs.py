@@ -537,46 +537,81 @@ def read_simlified_graph_from_file(file_path, node_list_json=None):
     return G
 
 
+def fill_cif_ligand_seq_ids(path):
+    """Ligands (e.g. metal ions) have no label_seq_id in _struct_conn, so topoly drops their metalc
+    bonds. Return the CIF text with these ids replaced by the (offset) auth_seq_id."""
+    import gemmi
+    doc = gemmi.cif.read(path)
+    block = doc.sole_block()
+    for label_col, auth_col in (('ptnr1_label_seq_id', 'ptnr1_auth_seq_id'),
+                                ('ptnr2_label_seq_id', 'ptnr2_auth_seq_id')):
+        for row in block.find('_struct_conn.', [label_col, auth_col]):
+            if row[0] == '.' and row[1].lstrip('-').isdigit():
+                row[0] = str(100000 + int(row[1]))
+    # topoly recognizes a CIF by '_entry.id' being in the third line
+    return doc.as_string().replace('\n', '\n#\n', 1)
+
+
 def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=TopolyReduce.FULL):
-    g = tp.Graph('data/' + input_file, chain=chain, bridges_type=bridge_type)
+    init_data = 'data/' + input_file
+    kwargs = {}
+    if input_file.lower().endswith('.cif'):
+        # With AUTH indexing topoly finds no bridges in mmCIF (struct_conn has no auth atom ids)
+        from topoly.params import ResidueIndexing
+        kwargs['residue_indexing'] = ResidueIndexing.LABEL
+        init_data = fill_cif_ligand_seq_ids(init_data)
+    g = tp.Graph(init_data, chain=chain, bridges_type=bridge_type, all_atoms=True, **kwargs)
     if reduce == TopolyReduce.INTERNAL:
         g.reduce()
-    edges = []
-    if hasattr(g, 'bridges_disulfide'):
-        for br in g.bridges_disulfide:
-            edges.append([br[0], br[1], 'disulfide'])
-    if hasattr(g, 'bridges_covalent'):
-        for br in g.bridges_covalent:
-            edges.append([br[0], br[1], 'covalent'])
-    if hasattr(g, 'bridges_ion'):
-        for br in g.bridges_ion:
-            edges.append([br[0], br[1], 'ion'])
-    else:
-        for br in g.bridges:
-            edges.append([br[0], br[1], 'bridge'])
 
-    if reduce == TopolyReduce.FULL:
-        for n in range(len(g.arcs) - 1):
-            arc = g.arcs[n]
-            if [arc[0], arc[-1]] not in g.bridges:
-                edges.append([arc[0], arc[-1], 'CA'])
-    else:
-        for arc in g.arcs:
-            if [arc[0], arc[-1]] not in g.bridges:
-                for n in range(len(arc) - 1):
-                    edges.append([arc[n], arc[n + 1], 'CA'])
-            #edges.append([arc[0], arc[-1], 'CA'])
-    print(input_file + ' ' + bridge_type + ": ", end="")
-    print(g.arcs)
+    def atom_node(atom):
+        return f'{atom[0]}_{atom[1]}'
+
+    edges = []
+    res_nodes = {}
+    atom_coords = {}
+
+    def add_bridges(bridges, bridges_atoms, btype):
+        for br, br_atoms in zip(bridges, bridges_atoms):
+            u, v = br_atoms[0], br_atoms[1]
+            for atom in (u, v):
+                nodes = res_nodes.setdefault(atom[0], [])
+                if atom_node(atom) not in nodes:
+                    nodes.append(atom_node(atom))
+                atom_coords[atom_node(atom)] = g.atoms.get((atom[0], atom[1]))
+            edges.append([atom_node(u), atom_node(v), btype])
+
+    add_bridges(g.bridges_disulfide, g.bridges_disulfide_atoms, 'disulfide')
+    add_bridges(g.bridges_covalent, g.bridges_covalent_atoms, 'covalent')
+    if g.bridges_ion:
+        add_bridges(g.bridges_ion, g.bridges_ion_atoms, 'ion')
+    elif not (g.bridges_disulfide or g.bridges_covalent):
+        add_bridges(g.bridges, g.bridges_atoms, 'bridge')
+
+    arcs = g.arcs[:-1] if reduce == TopolyReduce.FULL else g.arcs
+    for arc in arcs:
+        if [arc[0], arc[-1]] in g.bridges:
+            continue
+        seq = []
+        for res in arc:
+            if res in res_nodes:
+                seq.extend(res_nodes[res])
+            elif reduce != TopolyReduce.FULL or res in (arc[0], arc[-1]):
+                seq.append(f'{res}')
+        for n in range(len(seq) - 1):
+            if seq[n] != seq[n + 1]:
+                edges.append([seq[n], seq[n + 1], 'CA'])
     G = nx.Graph()
     coords_list = g.get_coords()
-    coords_dict = { coords_list[i][0]: coords_list[i][1:] for i in range(len(coords_list))}
+    coords_dict = {c[0]: c[1:] for c in coords_list}
     nodes = set(e for edge in edges for e in edge[:2])
-    print(sorted(list(nodes)))
     for n in nodes:
-        G.add_node(f'{n}', coords=coords_dict.get(n))
+        coords = atom_coords.get(n)
+        if coords is None:
+            coords = coords_dict.get(int(n)) if n.isdigit() else None
+        G.add_node(n, coords=coords)
     for edge in edges:
-        G.add_edge(f'{edge[0]}', f'{edge[1]}', weight=5 if edge[2] == 'CA' else 1, type=edge[2])
+        G.add_edge(edge[0], edge[1], weight=5 if edge[2] == 'CA' else 1, type=edge[2])
     return G
 
 if __name__=="__main__":
