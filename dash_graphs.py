@@ -245,7 +245,7 @@ def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=Fal
         node_color.append("crimson" if highlight and n in obs_nodes else "#1976d2")
         node_text.append(str(n))
     traces.append(go.Scatter3d(x=node_x,y=node_y,z=node_z,mode="markers+text",
-        text=node_text,textposition="top center",textfont=dict(size=22,color="#111"),
+        text=node_text,textposition="top center",textfont=dict(size=18,color="#111"),
         marker=dict(size=6,color=node_color,line=dict(width=1,color="white")),
         hoverinfo="text",showlegend=False))
     fig=go.Figure(data=traces)
@@ -358,13 +358,41 @@ def list_data_pdbids(data_dir='data'):
             ids[pid.upper()]=chain
     return [pid+(chain if chain and chain!='A' else '') for pid,chain in sorted(ids.items())]
 
-def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL,numbering='auth'):
+def merge_residue_nodes(G):
+    """Collapse the atom nodes (<residue>_<atom>) of each residue into a single residue node.
+    The edges inside a residue (side chain) disappear; bridges end up attached to the residue.
+    The node keeps the CA coordinates when available. Between two residues a bridge edge wins
+    over a backbone ('CA') edge."""
+    def residue(n):
+        return str(n).partition('_')[0]
+    M=nx.Graph()
+    coords={}
+    for n,c in G.nodes(data='coords'):
+        r=residue(n)
+        if r not in coords or str(n).endswith('_CA'):
+            coords[r]=c
+    for r,c in coords.items():
+        M.add_node(r,coords=c)
+    for u,v,d in G.edges(data=True):
+        ru,rv=residue(u),residue(v)
+        if ru==rv:
+            continue
+        if M.has_edge(ru,rv) and d.get('type')=='CA':
+            continue
+        M.add_edge(ru,rv,**d)
+    return M
+
+def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL,numbering='auth',merge_residues=False):
     """Load a graph for a PDB id using either the topoly bridge extraction or
     the pre-simplified CSV/JSON pair. Returns (graph, source_label)."""
     chain = 'A'
     if len(pdbid)>4:
         chain = pdbid[4:].strip()
         pdbid = pdbid[:4]
+    G,label=_load_graph(pdbid,chain,is_topoly,reduce,numbering)
+    return (merge_residue_nodes(G) if merge_residues else G),label
+
+def _load_graph(pdbid,chain,is_topoly,reduce,numbering):
     if is_topoly:
         #  chain='A',
         #return topoly_graph_to_networkx(f'{pdbid.upper()}.cif', chain=chain, bridge_type='all', reduce=reduce), 'Topoly'
@@ -432,6 +460,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         dcc.RadioItems(id="topoly-numbering",inline=True,value="auth",options=[
         {"label":"Label","value":"label"},{"label":"Auth","value":"auth"}]),
         ],id="topoly-reduce-container",style={**CONTROL_GROUP,"display":"flex" if is_topoly else "none"}),
+        dcc.Checklist(id="merge-residues",options=[{"label":"Merge residue edges","value":"on"}],value=[]),
         html.Button("Load",id="load-btn",n_clicks=0),
         ],style=CONTROL_GROUP),
         html.Div([
@@ -482,14 +511,14 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     @app.callback(Output("title-text","children"),Output("edge-color-attr","options"),
     Output("edge-color-attr","value"),Output("mode","value"),
     Output("subgraph-index","data",allow_duplicate=True),Output("graph-version","data"),
-    Input("load-btn","n_clicks"),Input("pdbid-input","value"),
+    Input("load-btn","n_clicks"),Input("pdbid-input","value"),Input("merge-residues","value"),
     State("pdbid-input","value"),State("source-type","value"),State("topoly-reduce","value"),State("topoly-numbering","value"),
     State("graph-version","data"),
     prevent_initial_call=True)
-    def load_new_graph(n_clicks,pdbid_input,pdbid_value,source_type,reduce_value,numbering,version):
+    def load_new_graph(n_clicks,pdbid_input,merge,pdbid_value,source_type,reduce_value,numbering,version):
         if not pdbid_value:
             raise PreventUpdate
-        g,tit=load_graph_by_id(pdbid_value,source_type=="topoly",reduce_value,numbering)
+        g,tit=load_graph_by_id(pdbid_value,source_type=="topoly",reduce_value,numbering,bool(merge))
         print(f'nodes: {sorted(g.nodes())}')
         print(f'edges: {sorted(g.edges())}')
         print('--------------------------------------------')
