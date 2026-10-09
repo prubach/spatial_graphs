@@ -1,4 +1,7 @@
+import colorsys
+import io
 import os
+import re
 import random
 import numpy as np
 import networkx as nx
@@ -164,6 +167,23 @@ def edge_color_map(graph,attr):
     palette={val:CATEGORICAL_PALETTE[i%len(CATEGORICAL_PALETTE)] for i,val in enumerate(values)}
     return {frozenset((u,v)):palette[d[attr]] for u,v,d in graph.edges(data=True) if attr in d}
 
+def rainbow_backbone_map(graph):
+    """Backbone ('CA') edge -> rainbow hex color following the residue order along the chain."""
+    def res(n):
+        head=str(n).partition('_')[0]
+        return int(head) if head.lstrip('-').isdigit() else None
+    edges=[(u,v) for u,v,d in graph.edges(data=True) if d.get("type")=="CA" and res(u) is not None and res(v) is not None]
+    if not edges:
+        return {}
+    pos={e:(res(e[0])+res(e[1]))/2 for e in edges}
+    lo,hi=min(pos.values()),max(pos.values())
+    span=(hi-lo) or 1
+    colors={}
+    for e,p in pos.items():
+        r,g,b=colorsys.hsv_to_rgb(0.78*(1-(p-lo)/span),0.9,0.95)
+        colors[frozenset(e)]="#%02x%02x%02x"%(round(r*255),round(g*255),round(b*255))
+    return colors
+
 def get_node_positions_3d(graph,seed=1):
     """Node -> (x,y,z), taken from each node's 'coords' attribute (set from PDB/topoly
     coordinates or from the JSON atom records); falls back to a 3D spring layout when
@@ -202,7 +222,7 @@ def tube_mesh(edges,node_pos,color,radius,sides=8):
         flatshading=False,lighting=dict(ambient=0.45,diffuse=0.8,specular=0.3,roughness=0.5),
         hoverinfo="none",showlegend=False)
 
-def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=False,edge_colors=None,show_grid=False):
+def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=False,edge_colors=None,show_grid=False,thickness=1.0):
     edge_colors=edge_colors or {}
     by_color={}
     for u,v in graph.edges():
@@ -212,7 +232,7 @@ def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=Fal
     traces=[]
     pts=np.array([node_pos[n] for n in graph.nodes()]) if graph.number_of_nodes() else np.zeros((1,3))
     extent=float(np.max(pts.max(axis=0)-pts.min(axis=0))) or 1.0
-    radius=extent*0.004
+    radius=extent*0.004*thickness
     for color,edges in by_color.items():
         traces.append(tube_mesh(edges,node_pos,color,radius))
     if highlight and obs_edges:
@@ -325,6 +345,19 @@ TOPOLY_REDUCE_OPTIONS=[
     {"label":"Full","value":TopolyReduce.FULL},
 ]
 
+def list_data_pdbids(data_dir='data'):
+    """PDB ids (with the chain appended when a simplified file names a chain other than A)
+    for the structures available in the data folder."""
+    ids={}
+    for name in os.listdir(data_dir):
+        base,ext=os.path.splitext(name)
+        if ext.lower() in ('.pdb','.cif'):
+            ids.setdefault(base.upper(),'')
+        elif name.endswith('_simplified_bonds.csv'):
+            pid,_,chain=name[:-len('_simplified_bonds.csv')].partition('-')
+            ids[pid.upper()]=chain
+    return [pid+(chain if chain and chain!='A' else '') for pid,chain in sorted(ids.items())]
+
 def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL,numbering='auth'):
     """Load a graph for a PDB id using either the topoly bridge extraction or
     the pre-simplified CSV/JSON pair. Returns (graph, source_label)."""
@@ -335,11 +368,9 @@ def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL,numbering='aut
     if is_topoly:
         #  chain='A',
         #return topoly_graph_to_networkx(f'{pdbid.upper()}.cif', chain=chain, bridge_type='all', reduce=reduce), 'Topoly'
-        G_pdb = topoly_graph_to_networkx(f'{pdbid.upper()}.pdb', chain=chain, bridge_type='all', reduce=reduce), 'Topoly'
-        #print(G_pdb.nodes)
-        G_cif = topoly_graph_to_networkx(f'{pdbid.upper()}.cif', chain=chain, bridge_type='all', reduce=reduce, numbering=numbering), 'Topoly'
-        #print(G_cif.nodes)
-        return G_cif
+        ext = 'cif' if os.path.exists(f'data/{pdbid.upper()}.cif') else 'pdb'
+        return topoly_graph_to_networkx(f'{pdbid.upper()}.{ext}', chain=chain, bridge_type='all', reduce=reduce,
+                                        numbering=numbering), 'Topoly'
     return read_simlified_graph_from_file(f"data/{pdbid.upper()}-{chain}_simplified_bonds.csv",
                                            f"data/{pdbid.upper()}-{chain}_simplified.json"), 'Simplified'
 
@@ -388,8 +419,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     html.H3(id="title-text",children=make_title(title,G)),
     html.Div([
         html.Div([
-        dcc.Input(id="pdbid-input",type="text",placeholder="PDB ID",value=pdbid,
-                   style={"width":"90px"},debounce=True),
+        dcc.Dropdown(id="pdbid-input",placeholder="PDB ID",value=pdbid or None,clearable=False,
+                   options=[{"label":p,"value":p} for p in list(dict.fromkeys(list_data_pdbids()+([pdbid] if pdbid else [])))],
+                   style={"width":"130px"}),
         dcc.RadioItems(id="source-type",inline=True,value="topoly" if is_topoly else "simplified",
         options=[{"label":"Topoly","value":"topoly"},{"label":"Simplified","value":"simplified"}]),
         html.Div([
@@ -427,6 +459,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         ],style=CONTROL_GROUP),
         html.Div([
         dcc.Checklist(id="show-grid",options=[{"label":"Show grid","value":"grid"}],value=["grid"]),
+        dcc.Checklist(id="rainbow-backbone",options=[{"label":"Rainbow backbone","value":"on"}],value=[]),
+        html.Div([html.Label("Edge thickness: "),
+        html.Div(dcc.Slider(id="edge-thickness",min=0.5,max=5,step=0.5,value=1,
+                            marks={0.5:"0.5",1:"1",2:"2",3:"3",4:"4",5:"5"}),style={"width":"220px"}),
+        ],style=CONTROL_GROUP),
+        html.Button("Export 3D to HTML",id="export-3d-btn",n_clicks=0),
+        dcc.Download(id="export-3d-download"),
         ],style=CONTROL_GROUP),
     ],style={"display":"flex","flexWrap":"wrap","gap":"20px","alignItems":"center","marginTop":"8px"}),
     html.Div(id="edge-color-legend"),
@@ -443,11 +482,11 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     @app.callback(Output("title-text","children"),Output("edge-color-attr","options"),
     Output("edge-color-attr","value"),Output("mode","value"),
     Output("subgraph-index","data",allow_duplicate=True),Output("graph-version","data"),
-    Input("load-btn","n_clicks"),Input("pdbid-input","n_submit"),
+    Input("load-btn","n_clicks"),Input("pdbid-input","value"),
     State("pdbid-input","value"),State("source-type","value"),State("topoly-reduce","value"),State("topoly-numbering","value"),
     State("graph-version","data"),
     prevent_initial_call=True)
-    def load_new_graph(n_clicks,n_submit,pdbid_value,source_type,reduce_value,numbering,version):
+    def load_new_graph(n_clicks,pdbid_input,pdbid_value,source_type,reduce_value,numbering,version):
         if not pdbid_value:
             raise PreventUpdate
         g,tit=load_graph_by_id(pdbid_value,source_type=="topoly",reduce_value,numbering)
@@ -477,10 +516,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         return f"Found {n} Kuratowski subgraph(s) - showing {idx+1} of {n}"
 
     @app.callback(Output("graph","stylesheet"),Output("edge-color-legend","children"),
-    Input("edge-color-attr","value"),Input("graph-version","data"))
-    def update_edge_colors(attr,_version):
+    Input("edge-color-attr","value"),Input("graph-version","data"),Input("rainbow-backbone","value"))
+    def update_edge_colors(attr,_version,rainbow):
         g=state['G']
-        stylesheet=BASE_STYLE+edge_color_stylesheet(g,attr)+OBSTRUCTION_STYLE
+        rainbow_rules=[{"selector":f'edge[source = "{u}"][target = "{v}"]',"style":{"line-color":c}}
+                       for (u,v),c in ((tuple(e),c) for e,c in rainbow_backbone_map(g).items())] if rainbow else []
+        rainbow_rules+=[{"selector":f'edge[source = "{v}"][target = "{u}"]',"style":r["style"]} for r in rainbow_rules for u,v in [(r["selector"].split('"')[3],r["selector"].split('"')[1])]]
+        stylesheet=BASE_STYLE+edge_color_stylesheet(g,attr)+rainbow_rules+OBSTRUCTION_STYLE
         return stylesheet,edge_color_legend(g,attr)
 
     @app.callback(Output("graph","elements"),
@@ -509,58 +551,92 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             return container_style(True,grid),container_style(False,grid)
         return container_style(False,grid),container_style(True,grid)
 
+    @app.callback(Output("export-3d-download","data"),
+    Input("export-3d-btn","n_clicks"),State("graph-3d","figure"),State("title-text","children"),
+    prevent_initial_call=True)
+    def export_3d(n_clicks,figure,title_text):
+        if not figure:
+            raise PreventUpdate
+        buffer=io.StringIO()
+        go.Figure(figure).write_html(buffer)
+        name=re.sub(r"[^A-Za-z0-9_.-]+","_",str(title_text or "graph")).strip("_")[:80] or "graph"
+        return dict(content=buffer.getvalue(),filename=f"{name}_3d.html",type="text/html")
+
     @app.callback(Output("graph-3d","figure"),
     Input("mode","value"),Input("subgraph-index","data"),Input("edge-color-attr","value"),
-    Input("graph-version","data"),Input("show-grid","value"))
-    def update_3d(mode,idx,attr,_version,grid_value):
+    Input("graph-version","data"),Input("show-grid","value"),
+    Input("rainbow-backbone","value"),Input("edge-thickness","value"))
+    def update_3d(mode,idx,attr,_version,grid_value,rainbow,thickness):
         g=state['G']
         node_pos_3d=state['node_pos_3d']
-        edge_colors=edge_color_map(g,attr)
+        thickness=thickness or 1.0
+        rainbow_colors=rainbow_backbone_map(g) if rainbow else {}
+        edge_colors={**edge_color_map(g,attr),**rainbow_colors}
         show_grid="grid" in (grid_value or [])
         if mode=="original":
-            return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid)
+            return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid,thickness=thickness)
         if mode=="highlight":
-            return build_3d_figure(g,node_pos_3d,state['obs_nodes'],state['obs_edges'],True,edge_colors,show_grid)
+            return build_3d_figure(g,node_pos_3d,state['obs_nodes'],state['obs_edges'],True,edge_colors,show_grid,thickness)
         if mode=="multi":
             multi_subgraphs=state['multi_subgraphs']
             if not multi_subgraphs:
-                return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid)
+                return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid,thickness=thickness)
             sub=multi_subgraphs[idx]
             sub_nodes=set(sub.nodes())
             sub_edges={frozenset(e) for e in sub.edges()}
-            return build_3d_figure(g,node_pos_3d,sub_nodes,sub_edges,True,edge_colors,show_grid)
+            return build_3d_figure(g,node_pos_3d,sub_nodes,sub_edges,True,edge_colors,show_grid,thickness)
         obs=state['obs']
         obs_pos_3d={n:node_pos_3d[n] for n in obs.nodes()} if not state['planar'] else {}
-        return build_3d_figure(obs,obs_pos_3d,edge_colors=edge_color_map(obs,attr),show_grid=show_grid)
+        return build_3d_figure(obs,obs_pos_3d,edge_colors={**edge_color_map(obs,attr),**rainbow_colors},show_grid=show_grid,thickness=thickness)
     return app
 
+SIMPLIFIED_BOND_TYPES={'disulf':'disulfide','metalc':'ion'}
+
 def read_simlified_graph_from_file(file_path, node_list_json=None):
+    """Read a simplified bonds CSV (+ JSON with atom records). Nodes are atoms named
+    <residue>_<atom>, as in topoly_graph_to_networkx; covale bonds are split into
+    'side chain' (inside a residue), 'CA' (simplified backbone between residues) and
+    'covalent' (original bond between residues)."""
+    import json
     G = nx.Graph()
-    atoms = None
-    atom_list = None
+    atom_list = {}
+    simplified = {}
     if node_list_json:
-        import json
         with open(node_list_json, 'r') as f:
             nodes = json.load(f)
-            atoms = nodes.get('atoms')
-            atom_list = { a['index'] : a for a in atoms } if atoms else {}
-            #G.add_nodes_from(nodes)
+        atom_list = {a['index']: a for a in nodes.get('atoms') or []}
+        simplified = {(b['ptnr1_id'], b['ptnr2_id']): b.get('is_simplified', False) for b in nodes.get('bonds') or []}
+
+    def node_of(idx):
+        atom = atom_list.get(idx)
+        if not atom:
+            return str(idx)
+        name = f"{atom.get('auth_residue_id', atom.get('residue_number'))}_{atom['atom']}"
+        if not G.has_node(name):
+            G.add_node(name, coords=(atom['x'], atom['y'], atom['z']))
+        return name
+
     with open(file_path, 'r') as f:
         for line in f:
             if line.startswith('#') or not line.strip():
                 continue  # Skip comments and empty lines
             parts = line.strip().split(',')
-            if len(parts) == 3:
-                t, u, v = parts
-                u_atom = atom_list.get(int(u)) if atom_list else None
-                v_atom = atom_list.get(int(v)) if atom_list else None
-                u_id = u_atom.get('auth_residue_id', u) if u_atom else u
-                v_id = v_atom.get('auth_residue_id', v) if v_atom else v
-                if u_atom and not G.has_node(u_id):
-                    G.add_node(u_id, coords=(u_atom['x'], u_atom['y'], u_atom['z']))
-                if v_atom and not G.has_node(v_id):
-                    G.add_node(v_id, coords=(v_atom['x'], v_atom['y'], v_atom['z']))
-                G.add_edge(u_id, v_id, type=t)
+            if len(parts) != 3:
+                continue
+            t, u, v = parts
+            u, v = int(u), int(v)
+            u_id, v_id = node_of(u), node_of(v)
+            if t in SIMPLIFIED_BOND_TYPES:
+                t = SIMPLIFIED_BOND_TYPES[t]
+            elif t == 'covale':
+                same_residue = u_id.partition('_')[0] == v_id.partition('_')[0]
+                if same_residue:
+                    t = 'side chain'
+                elif simplified.get((u, v), simplified.get((v, u), True)):
+                    t = 'CA'
+                else:
+                    t = 'covalent'
+            G.add_edge(u_id, v_id, type=t, weight=5 if t == 'CA' else 1)
     return G
 
 
