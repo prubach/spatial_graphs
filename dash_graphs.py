@@ -201,7 +201,7 @@ def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=Fal
         node_color.append("crimson" if highlight and n in obs_nodes else "#1976d2")
         node_text.append(str(n))
     traces.append(go.Scatter3d(x=node_x,y=node_y,z=node_z,mode="markers+text",
-        text=node_text,textposition="top center",textfont=dict(size=9,color="#333"),
+        text=node_text,textposition="top center",textfont=dict(size=15,color="#111"),
         marker=dict(size=6,color=node_color,line=dict(width=1,color="white")),
         hoverinfo="text",showlegend=False))
     fig=go.Figure(data=traces)
@@ -301,7 +301,7 @@ TOPOLY_REDUCE_OPTIONS=[
     {"label":"Full","value":TopolyReduce.FULL},
 ]
 
-def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL):
+def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL,numbering='label'):
     """Load a graph for a PDB id using either the topoly bridge extraction or
     the pre-simplified CSV/JSON pair. Returns (graph, source_label)."""
     chain = 'A'
@@ -313,7 +313,7 @@ def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL):
         #return topoly_graph_to_networkx(f'{pdbid.upper()}.cif', chain=chain, bridge_type='all', reduce=reduce), 'Topoly'
         G_pdb = topoly_graph_to_networkx(f'{pdbid.upper()}.pdb', chain=chain, bridge_type='all', reduce=reduce), 'Topoly'
         #print(G_pdb.nodes)
-        G_cif = topoly_graph_to_networkx(f'{pdbid.upper()}.cif', chain=chain, bridge_type='all', reduce=reduce), 'Topoly'
+        G_cif = topoly_graph_to_networkx(f'{pdbid.upper()}.cif', chain=chain, bridge_type='all', reduce=reduce, numbering=numbering), 'Topoly'
         #print(G_cif.nodes)
         return G_cif
     return read_simlified_graph_from_file(f"data/{pdbid.upper()}-{chain}_simplified_bonds.csv",
@@ -372,6 +372,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Label("Reduction: "),
         dcc.Dropdown(id="topoly-reduce",clearable=False,style={"width":"110px"},
         value=TopolyReduce.INTERNAL,options=TOPOLY_REDUCE_OPTIONS),
+        html.Label("Numbering: "),
+        dcc.RadioItems(id="topoly-numbering",inline=True,value="label",options=[
+        {"label":"Label","value":"label"},{"label":"Auth","value":"auth"}]),
         ],id="topoly-reduce-container",style={**CONTROL_GROUP,"display":"flex" if is_topoly else "none"}),
         html.Button("Load",id="load-btn",n_clicks=0),
         ],style=CONTROL_GROUP),
@@ -417,13 +420,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     Output("edge-color-attr","value"),Output("mode","value"),
     Output("subgraph-index","data",allow_duplicate=True),Output("graph-version","data"),
     Input("load-btn","n_clicks"),Input("pdbid-input","n_submit"),
-    State("pdbid-input","value"),State("source-type","value"),State("topoly-reduce","value"),
+    State("pdbid-input","value"),State("source-type","value"),State("topoly-reduce","value"),State("topoly-numbering","value"),
     State("graph-version","data"),
     prevent_initial_call=True)
-    def load_new_graph(n_clicks,n_submit,pdbid_value,source_type,reduce_value,version):
+    def load_new_graph(n_clicks,n_submit,pdbid_value,source_type,reduce_value,numbering,version):
         if not pdbid_value:
             raise PreventUpdate
-        g,tit=load_graph_by_id(pdbid_value,source_type=="topoly",reduce_value)
+        g,tit=load_graph_by_id(pdbid_value,source_type=="topoly",reduce_value,numbering)
         print(f'nodes: {sorted(g.nodes())}')
         print(f'edges: {sorted(g.edges())}')
         print('--------------------------------------------')
@@ -552,8 +555,19 @@ def fill_cif_ligand_seq_ids(path):
     return doc.as_string().replace('\n', '\n#\n', 1)
 
 
-def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=TopolyReduce.FULL):
-    init_data = 'data/' + input_file
+def cif_label_to_auth(path, chain):
+    """Map label_seq_id -> auth_seq_id for the given label_asym_id chain of an mmCIF file."""
+    import gemmi
+    block = gemmi.cif.read(path).sole_block()
+    mapping = {}
+    for asym, label, auth in block.find('_atom_site.', ['label_asym_id', 'label_seq_id', 'auth_seq_id']):
+        if asym == chain and label.isdigit() and auth.lstrip('-').isdigit():
+            mapping.setdefault(int(label), int(auth))
+    return mapping
+
+
+def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=TopolyReduce.FULL, numbering='label'):
+    init_data = init_data_path = 'data/' + input_file
     kwargs = {}
     if input_file.lower().endswith('.cif'):
         # With AUTH indexing topoly finds no bridges in mmCIF (struct_conn has no auth atom ids)
@@ -612,6 +626,14 @@ def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=To
         G.add_node(n, coords=coords)
     for edge in edges:
         G.add_edge(edge[0], edge[1], weight=5 if edge[2] == 'CA' else 1, type=edge[2])
+    if numbering == 'auth' and input_file.lower().endswith('.cif'):
+        auth = cif_label_to_auth(init_data_path, chain)
+        def to_auth(name):
+            res, _, atom = name.partition('_')
+            res = int(res)
+            new = auth.get(res, res - 100000 if res >= 100000 else res)
+            return f'{new}_{atom}' if atom else f'{new}'
+        G = nx.relabel_nodes(G, {n: to_auth(n) for n in G.nodes()})
     return G
 
 if __name__=="__main__":
