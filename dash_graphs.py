@@ -725,7 +725,7 @@ def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=To
 
 def _path_prefix():
     """Return the URL prefix from CONTEXT_PATH env var (default: 'spatialgraph'); empty value means root."""
-    ctx = os.environ.get("CONTEXT_PATH", "spatialgraph").strip("/")
+    ctx = os.environ.get("CONTEXT_PATH", "spatialgraphs").strip("/")
     return f"/{ctx}/" if ctx else "/"
 
 if __name__=="__main__":
