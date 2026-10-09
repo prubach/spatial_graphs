@@ -540,21 +540,6 @@ def read_simlified_graph_from_file(file_path, node_list_json=None):
     return G
 
 
-def fill_cif_ligand_seq_ids(path):
-    """Ligands (e.g. metal ions) have no label_seq_id in _struct_conn, so topoly drops their metalc
-    bonds. Return the CIF text with these ids replaced by the (offset) auth_seq_id."""
-    import gemmi
-    doc = gemmi.cif.read(path)
-    block = doc.sole_block()
-    for label_col, auth_col in (('ptnr1_label_seq_id', 'ptnr1_auth_seq_id'),
-                                ('ptnr2_label_seq_id', 'ptnr2_auth_seq_id')):
-        for row in block.find('_struct_conn.', [label_col, auth_col]):
-            if row[0] == '.' and row[1].lstrip('-').isdigit():
-                row[0] = str(100000 + int(row[1]))
-    # topoly recognizes a CIF by '_entry.id' being in the third line
-    return doc.as_string().replace('\n', '\n#\n', 1)
-
-
 def cif_label_to_auth(path, chain):
     """Map label_seq_id -> auth_seq_id for the given label_asym_id chain of an mmCIF file."""
     import gemmi
@@ -570,10 +555,9 @@ def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=To
     init_data = init_data_path = 'data/' + input_file
     kwargs = {}
     if input_file.lower().endswith('.cif'):
-        # With AUTH indexing topoly finds no bridges in mmCIF (struct_conn has no auth atom ids)
+        # AUTH indexing numbers ligands/ions (no label_seq_id) consistently, so their metalc bridges are kept
         from topoly.params import ResidueIndexing
-        kwargs['residue_indexing'] = ResidueIndexing.LABEL
-        init_data = fill_cif_ligand_seq_ids(init_data)
+        kwargs['residue_indexing'] = ResidueIndexing.AUTH
     g = tp.Graph(init_data, chain=chain, bridges_type=bridge_type, all_atoms=True, **kwargs)
     if reduce == TopolyReduce.INTERNAL:
         g.reduce()
@@ -616,8 +600,7 @@ def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=To
             if seq[n] != seq[n + 1]:
                 edges.append([seq[n], seq[n + 1], 'CA'])
     G = nx.Graph()
-    coords_list = g.get_coords()
-    coords_dict = {c[0]: c[1:] for c in coords_list}
+    coords_dict = {k: list(v) for k, v in g.coordinates.items()}
     nodes = set(e for edge in edges for e in edge[:2])
     for n in nodes:
         coords = atom_coords.get(n)
@@ -626,14 +609,13 @@ def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=To
         G.add_node(n, coords=coords)
     for edge in edges:
         G.add_edge(edge[0], edge[1], weight=5 if edge[2] == 'CA' else 1, type=edge[2])
-    if numbering == 'auth' and input_file.lower().endswith('.cif'):
-        auth = cif_label_to_auth(init_data_path, chain)
-        def to_auth(name):
+    if numbering == 'label' and input_file.lower().endswith('.cif'):
+        to_label = {auth: label for label, auth in cif_label_to_auth(init_data_path, chain).items()}
+        def relabel(name):
             res, _, atom = name.partition('_')
-            res = int(res)
-            new = auth.get(res, res - 100000 if res >= 100000 else res)
+            new = to_label.get(int(res), res)
             return f'{new}_{atom}' if atom else f'{new}'
-        G = nx.relabel_nodes(G, {n: to_auth(n) for n in G.nodes()})
+        G = nx.relabel_nodes(G, {n: relabel(n) for n in G.nodes()})
     return G
 
 if __name__=="__main__":
