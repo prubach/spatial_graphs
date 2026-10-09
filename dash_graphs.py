@@ -515,7 +515,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         ],style=ROW),
         html.Div([
         html.Label("Label font size",style=LABEL),
-        dcc.Dropdown(id="node-font-size",clearable=False,style={"width":"90px"},value=18,
+        dcc.Dropdown(id="node-font-size",clearable=False,style={"width":"90px"},value=14,
                      options=[{"label":str(v),"value":v} for v in NODE_FONT_SIZES]),
         ],style=ROW),
         html.Div([
