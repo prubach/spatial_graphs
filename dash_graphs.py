@@ -1,5 +1,6 @@
 import os
 import random
+import numpy as np
 import networkx as nx
 from dash import Dash, html, dcc, Input, Output, State, ctx
 from dash.exceptions import PreventUpdate
@@ -171,6 +172,36 @@ def get_node_positions_3d(graph,seed=1):
         return {n:tuple(graph.nodes[n]['coords']) for n in graph.nodes()}
     return nx.spring_layout(graph,dim=3,seed=seed)
 
+def tube_mesh(edges,node_pos,color,radius,sides=8):
+    """Shaded cylinders for the edges, so that overlapping edges are occluded properly and
+    their relative depth is visible."""
+    verts,faces=[],[]
+    angles=np.linspace(0,2*np.pi,sides,endpoint=False)
+    for u,v in edges:
+        p0=np.array(node_pos[u],dtype=float); p1=np.array(node_pos[v],dtype=float)
+        d=p1-p0
+        length=np.linalg.norm(d)
+        if length==0:
+            continue
+        d/=length
+        a=np.array([1.0,0,0]) if abs(d[0])<0.9 else np.array([0,1.0,0])
+        e1=np.cross(d,a); e1/=np.linalg.norm(e1)
+        e2=np.cross(d,e1)
+        base=len(verts)
+        ring=[radius*(np.cos(t)*e1+np.sin(t)*e2) for t in angles]
+        verts.extend(p0+r for r in ring)
+        verts.extend(p1+r for r in ring)
+        for i in range(sides):
+            j=(i+1)%sides
+            faces.append((base+i,base+j,base+sides+j))
+            faces.append((base+i,base+sides+j,base+sides+i))
+    if not verts:
+        return go.Mesh3d(x=[],y=[],z=[])
+    vs=np.array(verts); fs=np.array(faces)
+    return go.Mesh3d(x=vs[:,0],y=vs[:,1],z=vs[:,2],i=fs[:,0],j=fs[:,1],k=fs[:,2],color=color,
+        flatshading=False,lighting=dict(ambient=0.45,diffuse=0.8,specular=0.3,roughness=0.5),
+        hoverinfo="none",showlegend=False)
+
 def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=False,edge_colors=None,show_grid=False):
     edge_colors=edge_colors or {}
     by_color={}
@@ -179,21 +210,14 @@ def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=Fal
             continue
         by_color.setdefault(edge_colors.get(frozenset((u,v)),"#999"),[]).append((u,v))
     traces=[]
+    pts=np.array([node_pos[n] for n in graph.nodes()]) if graph.number_of_nodes() else np.zeros((1,3))
+    extent=float(np.max(pts.max(axis=0)-pts.min(axis=0))) or 1.0
+    radius=extent*0.004
     for color,edges in by_color.items():
-        xs,ys,zs=[],[],[]
-        for u,v in edges:
-            x0,y0,z0=node_pos[u]; x1,y1,z1=node_pos[v]
-            xs+=[x0,x1,None]; ys+=[y0,y1,None]; zs+=[z0,z1,None]
-        traces.append(go.Scatter3d(x=xs,y=ys,z=zs,mode="lines",
-            line=dict(color=color,width=5),hoverinfo="none",showlegend=False))
+        traces.append(tube_mesh(edges,node_pos,color,radius))
     if highlight and obs_edges:
-        xs,ys,zs=[],[],[]
-        for u,v in graph.edges():
-            if frozenset((u,v)) in obs_edges:
-                x0,y0,z0=node_pos[u]; x1,y1,z1=node_pos[v]
-                xs+=[x0,x1,None]; ys+=[y0,y1,None]; zs+=[z0,z1,None]
-        traces.append(go.Scatter3d(x=xs,y=ys,z=zs,mode="lines",
-            line=dict(color="crimson",width=12),hoverinfo="none",showlegend=False))
+        obs=[(u,v) for u,v in graph.edges() if frozenset((u,v)) in obs_edges]
+        traces.append(tube_mesh(obs,node_pos,"crimson",radius*2))
     node_x,node_y,node_z,node_color,node_text=[],[],[],[],[]
     for n in graph.nodes():
         x,y,z=node_pos[n]
@@ -201,7 +225,7 @@ def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=Fal
         node_color.append("crimson" if highlight and n in obs_nodes else "#1976d2")
         node_text.append(str(n))
     traces.append(go.Scatter3d(x=node_x,y=node_y,z=node_z,mode="markers+text",
-        text=node_text,textposition="top center",textfont=dict(size=15,color="#111"),
+        text=node_text,textposition="top center",textfont=dict(size=22,color="#111"),
         marker=dict(size=6,color=node_color,line=dict(width=1,color="white")),
         hoverinfo="text",showlegend=False))
     fig=go.Figure(data=traces)
@@ -586,26 +610,31 @@ def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=To
     elif not (g.bridges_disulfide or g.bridges_covalent):
         add_bridges(g.bridges, g.bridges_atoms, 'bridge')
 
+    # the side-chain atoms forming a bridge hang off the CA of their residue
+    for res, nodes in res_nodes.items():
+        if (res, 'CA') in g.atoms:
+            for node in nodes:
+                if node != atom_node((res, 'CA')):
+                    edges.append([atom_node((res, 'CA')), node, 'side chain'])
+
     arcs = g.arcs[:-1] if reduce == TopolyReduce.FULL else g.arcs
     for arc in arcs:
         if [arc[0], arc[-1]] in g.bridges:
             continue
         seq = []
         for res in arc:
-            if res in res_nodes:
+            if res in res_nodes and (res, 'CA') not in g.atoms:
                 seq.extend(res_nodes[res])
-            elif reduce != TopolyReduce.FULL or res in (arc[0], arc[-1]):
-                seq.append(f'{res}')
+            elif res in res_nodes or reduce != TopolyReduce.FULL or res in (arc[0], arc[-1]):
+                seq.append(atom_node((res, 'CA')))
         for n in range(len(seq) - 1):
             if seq[n] != seq[n + 1]:
                 edges.append([seq[n], seq[n + 1], 'CA'])
     G = nx.Graph()
-    coords_dict = {k: list(v) for k, v in g.coordinates.items()}
     nodes = set(e for edge in edges for e in edge[:2])
     for n in nodes:
-        coords = atom_coords.get(n)
-        if coords is None:
-            coords = coords_dict.get(int(n)) if n.isdigit() else None
+        res, _, atom = n.partition('_')
+        coords = atom_coords.get(n) or g.atoms.get((int(res), atom))
         G.add_node(n, coords=coords)
     for edge in edges:
         G.add_edge(edge[0], edge[1], weight=5 if edge[2] == 'CA' else 1, type=edge[2])
