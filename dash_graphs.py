@@ -494,6 +494,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         {"label":"Highlight obstruction","value":"highlight"},
         {"label":"Obstruction only","value":"obstruction"},
         {"label":"Multiple obstructions","value":"multi"}],labelStyle=OPT),
+        dcc.Checklist(id="selected-obstruction-only",
+                      options=[{"label":"Show selected obstruction only","value":"on"}],
+                      value=[],labelStyle=OPT),
         html.Div([
         html.Button("< Prev",id="prev-btn",n_clicks=0,style=BTN),
         html.Button("Next >",id="next-btn",n_clicks=0,style=BTN),
@@ -586,8 +589,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         return stylesheet,edge_color_legend(g,attr)
 
     @app.callback(Output("graph","elements"),
-    Input("mode","value"),Input("subgraph-index","data"),Input("graph-version","data"))
-    def update(mode,idx,_version):
+    Input("mode","value"),Input("subgraph-index","data"),Input("graph-version","data"),
+    Input("selected-obstruction-only","value"))
+    def update(mode,idx,_version,selected_obstruction_only):
         g=state['G']
         if mode=="original":
             return build_elements(g,state['pos'])
@@ -600,6 +604,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             sub=multi_subgraphs[idx]
             sub_nodes=set(sub.nodes())
             sub_edges={frozenset(e) for e in sub.edges()}
+            if "on" in (selected_obstruction_only or []):
+                selected_graph=g.edge_subgraph(sub.edges())
+                return build_elements(selected_graph,state['pos'],sub_nodes,sub_edges,True)
             return build_elements(g,state['pos'],sub_nodes,sub_edges,True)
         return build_elements(state['obs'],state['obs_pos'])
 
@@ -625,8 +632,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     @app.callback(Output("graph-3d","figure"),
     Input("mode","value"),Input("subgraph-index","data"),Input("edge-color-attr","value"),
     Input("graph-version","data"),Input("show-grid","value"),
-    Input("rainbow-backbone","value"),Input("edge-thickness","value"),Input("node-font-size","value"))
-    def update_3d(mode,idx,attr,_version,grid_value,rainbow,thickness,font_size):
+    Input("rainbow-backbone","value"),Input("edge-thickness","value"),Input("node-font-size","value"),
+    Input("selected-obstruction-only","value"))
+    def update_3d(mode,idx,attr,_version,grid_value,rainbow,thickness,font_size,selected_obstruction_only):
         font_size=font_size or 18
         g=state['G']
         node_pos_3d=state['node_pos_3d']
@@ -645,6 +653,10 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             sub=multi_subgraphs[idx]
             sub_nodes=set(sub.nodes())
             sub_edges={frozenset(e) for e in sub.edges()}
+            if "on" in (selected_obstruction_only or []):
+                selected_graph=g.edge_subgraph(sub.edges())
+                return build_3d_figure(selected_graph,node_pos_3d,sub_nodes,sub_edges,True,
+                                       edge_colors,show_grid,thickness,font_size)
             return build_3d_figure(g,node_pos_3d,sub_nodes,sub_edges,True,edge_colors,show_grid,thickness,font_size)
         obs=state['obs']
         obs_pos_3d={n:node_pos_3d[n] for n in obs.nodes()} if not state['planar'] else {}
