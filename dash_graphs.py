@@ -335,6 +335,128 @@ def find_multiple_kuratowski_subgraphs_ogdf(graph):
     return subgraphs
 
 
+def simplify_subgraph_topoly(selected_graph, node_pos_3d=None, method='kmt'):
+    """Simplify a subgraph (e.g. Kuratowski subdivision) by generating a Topoly
+    Graph object from its 3D arcs and applying its reduce() method."""
+    if selected_graph.number_of_edges() == 0:
+        return selected_graph.copy()
+
+    # Map reduction method string to topoly ReduceMethod if needed
+    reduce_method = method
+    if isinstance(method, str):
+        from topoly.params import ReduceMethod
+        method_upper = method.upper()
+        if hasattr(ReduceMethod, method_upper):
+            reduce_method = getattr(ReduceMethod, method_upper)
+
+    branch_nodes = [n for n in selected_graph.nodes() if selected_graph.degree(n) != 2]
+    visited = set()
+    arcs = []
+    for u in branch_nodes:
+        for v in selected_graph.neighbors(u):
+            e = frozenset((u, v))
+            if e in visited:
+                continue
+            visited.add(e)
+            path = [u, v]
+            curr, prev = v, u
+            while selected_graph.degree(curr) == 2 and curr not in branch_nodes:
+                nbrs = [n for n in selected_graph.neighbors(curr) if n != prev]
+                if not nbrs:
+                    break
+                nxt = nbrs[0]
+                visited.add(frozenset((curr, nxt)))
+                path.append(nxt)
+                prev, curr = curr, nxt
+            arcs.append(path)
+    for u, v in selected_graph.edges():
+        e = frozenset((u, v))
+        if e in visited:
+            continue
+        visited.add(e)
+        path = [u, v]
+        curr, prev = v, u
+        while curr != u:
+            nbrs = [n for n in selected_graph.neighbors(curr) if n != prev]
+            if not nbrs:
+                break
+            nxt = nbrs[0]
+            visited.add(frozenset((curr, nxt)))
+            path.append(nxt)
+            prev, curr = curr, nxt
+        arcs.append(path)
+
+    node_to_id = {n: i for i, n in enumerate(selected_graph.nodes())}
+    id_to_node = {i: n for n, i in node_to_id.items()}
+
+    arcs_4d = []
+    for p in arcs:
+        arc = []
+        for n in p:
+            c = selected_graph.nodes[n].get('coords')
+            if c is None and node_pos_3d is not None:
+                c = node_pos_3d.get(n)
+            if c is None:
+                c = (0.0, 0.0, 0.0)
+            arc.append([node_to_id[n], float(c[0]), float(c[1]), float(c[2])])
+        arcs_4d.append(arc)
+
+    try:
+        tp_g = tp.Graph(arcs_4d)
+        tp_g.reduce(method=reduce_method)
+    except Exception:
+        return selected_graph.copy()
+
+    simp_g = nx.Graph()
+    for n in selected_graph.nodes():
+        idx = node_to_id[n]
+        if idx in tp_g.coordinates:
+            c = selected_graph.nodes[n].get('coords')
+            if c is None and node_pos_3d is not None:
+                c = node_pos_3d.get(n)
+            if c is None:
+                c = tuple(tp_g.coordinates[idx])
+            simp_g.add_node(n, coords=c)
+
+    for arc in tp_g.arcs:
+        for i in range(len(arc) - 1):
+            u = id_to_node.get(arc[i])
+            v = id_to_node.get(arc[i+1])
+            if u is None or v is None or u == v:
+                continue
+            if selected_graph.has_edge(u, v):
+                attrs = dict(selected_graph[u][v])
+            else:
+                orig_path = None
+                for p in arcs:
+                    if u in p and v in p:
+                        orig_path = p
+                        break
+                attrs = {}
+                if orig_path:
+                    iu, iv = orig_path.index(u), orig_path.index(v)
+                    if iu > iv:
+                        iu, iv = iv, iu
+                    sub = orig_path[iu : iv + 1]
+                    types = [selected_graph[sub[k]][sub[k+1]].get('type')
+                             for k in range(len(sub) - 1)
+                             if selected_graph.has_edge(sub[k], sub[k+1])]
+                    bridges = [t for t in types if t in ('disulfide', 'covalent', 'ion', 'bridge', 'metalc', 'disulf')]
+                    if bridges:
+                        attrs['type'] = bridges[0]
+                    elif 'side chain' in types:
+                        attrs['type'] = 'side chain'
+                    elif 'CA' in types:
+                        attrs['type'] = 'CA'
+                    elif types and types[0] is not None:
+                        attrs['type'] = types[0]
+                    if 'type' in attrs:
+                        attrs['weight'] = 5 if attrs['type'] == 'CA' else 1
+            simp_g.add_edge(u, v, **attrs)
+
+    return simp_g
+
+
 class TopolyReduce:
     """
     Type of Topoly reduction.
@@ -347,6 +469,12 @@ TOPOLY_REDUCE_OPTIONS=[
     {"label":"None","value":TopolyReduce.NO},
     {"label":"Internal","value":TopolyReduce.INTERNAL},
     {"label":"Full","value":TopolyReduce.FULL},
+]
+
+TOPOLY_SUBGRAPH_REDUCE_OPTIONS=[
+    {"label":"KMT","value":"kmt"},
+    {"label":"Reidemeister","value":"reidemeister"},
+    {"label":"Easy","value":"easy"},
 ]
 
 def list_data_pdbids(data_dir='data'):
@@ -429,8 +557,18 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
 
         node_pos_3d=get_node_positions_3d(g)
         state.update(G=g,planar=planar,obs=obs,pos=pos,obs_nodes=obs_nodes,obs_edges=obs_edges,
-                     obs_pos=obs_pos,multi_subgraphs=multi_subgraphs,node_pos_3d=node_pos_3d)
+                     obs_pos=obs_pos,multi_subgraphs=multi_subgraphs,node_pos_3d=node_pos_3d,
+                     multi_subgraphs_simplified={})
     recompute(G)
+
+    def get_simplified_subgraph(idx,selected_graph,method='kmt'):
+        cache_key=(idx,method)
+        cached=state.get('multi_subgraphs_simplified',{}).get(cache_key)
+        if cached is not None:
+            return cached
+        simp=simplify_subgraph_topoly(selected_graph,state.get('node_pos_3d'),method=method)
+        state.setdefault('multi_subgraphs_simplified',{})[cache_key]=simp
+        return simp
 
     def make_title(t,g):
         return f"{t} - Planar: {state['planar']}, Nodes: {g.number_of_nodes()}, Edges: {g.number_of_edges()}"
@@ -494,9 +632,19 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         {"label":"Highlight obstruction","value":"highlight"},
         {"label":"Obstruction only","value":"obstruction"},
         {"label":"Multiple obstructions","value":"multi"}],labelStyle=OPT),
+        html.Div([
         dcc.Checklist(id="selected-obstruction-only",
                       options=[{"label":"Show selected obstruction only","value":"on"}],
                       value=[],labelStyle=OPT),
+        dcc.Checklist(id="simplify-subgraph",
+                      options=[{"label":"Simplify subgraph","value":"on"}],
+                      value=[],labelStyle=OPT),
+        html.Div([
+            html.Label("Method",style={**LABEL,"minWidth":"auto"}),
+            dcc.Dropdown(id="simplify-method",clearable=False,style={"width":"120px"},
+                         value="kmt",options=TOPOLY_SUBGRAPH_REDUCE_OPTIONS),
+        ],id="simplify-method-container",style={**CONTROL_GROUP,"display":"none"}),
+        ],style=ROW),
         html.Div([
         html.Button("< Prev",id="prev-btn",n_clicks=0,style=BTN),
         html.Button("Next >",id="next-btn",n_clicks=0,style=BTN),
@@ -541,6 +689,10 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     @app.callback(Output("topoly-reduce-container","style"),Input("source-type","value"))
     def toggle_topoly_reduce(source_type):
         return {**CONTROL_GROUP,"display":"flex" if source_type=="topoly" else "none"}
+
+    @app.callback(Output("simplify-method-container","style"),Input("simplify-subgraph","value"))
+    def toggle_simplify_method(simplify_val):
+        return {**CONTROL_GROUP,"display":"flex" if "on" in (simplify_val or []) else "none"}
 
     @app.callback(Output("title-text","children"),Output("edge-color-attr","options"),
     Output("edge-color-attr","value"),Output("mode","value"),
@@ -590,8 +742,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
 
     @app.callback(Output("graph","elements"),
     Input("mode","value"),Input("subgraph-index","data"),Input("graph-version","data"),
-    Input("selected-obstruction-only","value"))
-    def update(mode,idx,_version,selected_obstruction_only):
+    Input("selected-obstruction-only","value"),Input("simplify-subgraph","value"),
+    Input("simplify-method","value"))
+    def update(mode,idx,_version,selected_obstruction_only,simplify_subgraph,simplify_method):
         g=state['G']
         if mode=="original":
             return build_elements(g,state['pos'])
@@ -606,6 +759,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             sub_edges={frozenset(e) for e in sub.edges()}
             if "on" in (selected_obstruction_only or []):
                 selected_graph=g.edge_subgraph(sub.edges())
+                if "on" in (simplify_subgraph or []):
+                    simp_g=get_simplified_subgraph(idx,selected_graph,method=simplify_method or "kmt")
+                    return build_elements(simp_g,state['pos'],set(simp_g.nodes()),{frozenset(e) for e in simp_g.edges()},True)
                 return build_elements(selected_graph,state['pos'],sub_nodes,sub_edges,True)
             return build_elements(g,state['pos'],sub_nodes,sub_edges,True)
         return build_elements(state['obs'],state['obs_pos'])
@@ -633,8 +789,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     Input("mode","value"),Input("subgraph-index","data"),Input("edge-color-attr","value"),
     Input("graph-version","data"),Input("show-grid","value"),
     Input("rainbow-backbone","value"),Input("edge-thickness","value"),Input("node-font-size","value"),
-    Input("selected-obstruction-only","value"))
-    def update_3d(mode,idx,attr,_version,grid_value,rainbow,thickness,font_size,selected_obstruction_only):
+    Input("selected-obstruction-only","value"),Input("simplify-subgraph","value"),
+    Input("simplify-method","value"))
+    def update_3d(mode,idx,attr,_version,grid_value,rainbow,thickness,font_size,selected_obstruction_only,simplify_subgraph,simplify_method):
         font_size=font_size or 18
         g=state['G']
         node_pos_3d=state['node_pos_3d']
@@ -655,6 +812,11 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             sub_edges={frozenset(e) for e in sub.edges()}
             if "on" in (selected_obstruction_only or []):
                 selected_graph=g.edge_subgraph(sub.edges())
+                if "on" in (simplify_subgraph or []):
+                    simp_g=get_simplified_subgraph(idx,selected_graph,method=simplify_method or "kmt")
+                    simp_edge_colors={**edge_color_map(simp_g,attr),**(rainbow_backbone_map(simp_g) if rainbow else {})}
+                    return build_3d_figure(simp_g,node_pos_3d,set(simp_g.nodes()),{frozenset(e) for e in simp_g.edges()},True,
+                                           simp_edge_colors,show_grid,thickness,font_size)
                 return build_3d_figure(selected_graph,node_pos_3d,sub_nodes,sub_edges,True,
                                        edge_colors,show_grid,thickness,font_size)
             return build_3d_figure(g,node_pos_3d,sub_nodes,sub_edges,True,edge_colors,show_grid,thickness,font_size)
@@ -729,9 +891,15 @@ def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=To
     kwargs = {}
     if input_file.lower().endswith('.cif'):
         # AUTH indexing numbers ligands/ions (no label_seq_id) consistently, so their metalc bridges are kept
-        from topoly.params import ResidueIndexing
-        kwargs['residue_indexing'] = ResidueIndexing.AUTH
-    g = tp.Graph(init_data, chain=chain, bridges_type=bridge_type, all_atoms=True, **kwargs)
+        try:
+            from topoly.params import ResidueIndexing
+            kwargs['residue_indexing'] = ResidueIndexing.AUTH
+        except (ImportError, AttributeError):
+            pass
+    try:
+        g = tp.Graph(init_data, chain=chain, bridges_type=bridge_type, all_atoms=True, **kwargs)
+    except TypeError:
+        g = tp.Graph(init_data, chain=chain, bridges_type=bridge_type)
     if reduce == TopolyReduce.INTERNAL:
         g.reduce()
 
