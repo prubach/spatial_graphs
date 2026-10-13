@@ -8,7 +8,7 @@ import threading
 import random
 import numpy as np
 import networkx as nx
-from dash import Dash, html, dcc, Input, Output, State, ctx
+from dash import Dash, html, dcc, Input, Output, State, ctx, no_update
 from dash.exceptions import PreventUpdate
 import dash_cytoscape as cyto
 import plotly.graph_objects as go
@@ -543,6 +543,72 @@ def _evaluate_subgraph_knot_worker(arcs_4d, node_coords_list, tries=500):
     return '0_1', max_unknot_prob if max_unknot_prob > 0 else 1.0
 
 
+def _parse_nxyz_loop(text):
+    ids, coords = [], []
+    for line in text.strip().splitlines():
+        parts = line.split()
+        if len(parts) == 4:
+            ids.append(int(parts[0]))
+            coords.append([float(parts[1]), float(parts[2]), float(parts[3])])
+    return ids, coords
+
+
+def classify_homfly(res, max_unknot=0.5, min_knot=0.48):
+    """Return (knot_type, knot_prob, unknot_prob) if the HOMFLY result is knotted, else None."""
+    if not res:
+        return None
+    unknot = float(res.get('0_1', 0.0))
+    knots = {k: float(v) for k, v in res.items() if k not in ('0_1', 'TMC')}
+    if not knots:
+        return None
+    best = max(knots, key=knots.get)
+    if unknot < max_unknot and knots[best] >= min_knot:
+        return best, knots[best], unknot
+    return None
+
+
+def find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None):
+    """Enumerate loops of `graph` with Topoly and return those that HOMFLY classifies as knotted,
+    as dicts with the loop's node sequence, knot type and probabilities (most probable first)."""
+    from concurrent.futures import ThreadPoolExecutor
+    nodes = list(graph.nodes())
+    id_to_node = dict(enumerate(nodes))
+    arcs = []
+    for u, v in graph.edges():
+        arc = []
+        for n in (u, v):
+            c = graph.nodes[n].get('coords')
+            if c is None and node_pos_3d is not None:
+                c = node_pos_3d.get(n)
+            c = c if c is not None else (0.0, 0.0, 0.0)
+            arc.append([nodes.index(n), float(c[0]), float(c[1]), float(c[2])])
+        arcs.append(arc)
+    if not arcs:
+        return []
+    loops = list(tp.Graph(arcs).find_loops(output_type=OutputType.NXYZ, arc_bridges=0))
+
+    seen, unique = set(), []
+    for text in loops:
+        ids, coords = _parse_nxyz_loop(text)
+        if len(ids) < 3:
+            continue
+        key = frozenset(frozenset((ids[i], ids[(i + 1) % len(ids)])) for i in range(len(ids)))
+        if key not in seen:
+            seen.add(key)
+            unique.append((ids, coords))
+
+    def evaluate(item):
+        ids, coords = item
+        verdict = classify_homfly(_isolated_homfly(coords, tries))
+        if verdict is None:
+            return None
+        return dict(nodes=[id_to_node[i] for i in ids], knot=verdict[0], prob=verdict[1], unknot_prob=verdict[2])
+
+    with ThreadPoolExecutor(max_workers=workers or min(8, os.cpu_count() or 1)) as pool:
+        found = [r for r in pool.map(evaluate, unique) if r is not None]
+    return sorted(found, key=lambda r: -r['prob'])
+
+
 def _homfly_child(conn, arcs_4d, node_coords_list, tries):
     conn.send(_evaluate_subgraph_knot_worker(arcs_4d, node_coords_list, tries))
     conn.close()
@@ -741,7 +807,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         node_pos_3d=get_node_positions_3d(g)
         state.update(G=g,planar=planar,obs=obs,pos=pos,obs_nodes=obs_nodes,obs_edges=obs_edges,
                      obs_pos=obs_pos,multi_subgraphs=multi_subgraphs,node_pos_3d=node_pos_3d,
-                     multi_subgraphs_simplified={},homfly_cache={})
+                     multi_subgraphs_simplified={},homfly_cache={},knotted_loops=[])
     recompute(G)
 
     def get_simplified_subgraph(idx,selected_graph,method='kmt'):
@@ -780,8 +846,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     BTN_PRIMARY={**BTN,"background":"#1976d2","color":"white","border":"1px solid #1565c0","fontWeight":"600"}
     OPT={"marginRight":"12px","fontSize":"13px"}
 
-    def panel(title,*rows):
-        return html.Div([html.Div(title,style=PANEL_TITLE),*rows],style=PANEL)
+    def panel(title,*rows,style=None):
+        return html.Div([html.Div(title,style=PANEL_TITLE),*rows],style={**PANEL,**(style or {})})
 
     THICKNESS_VALUES=EDGE_THICKNESS_VALUES
     app.layout=html.Div([
@@ -814,7 +880,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         {"label":"Original","value":"original"},
         {"label":"Highlight obstruction","value":"highlight"},
         {"label":"Obstruction only","value":"obstruction"},
-        {"label":"Multiple obstructions","value":"multi"}],labelStyle=OPT),
+        {"label":"Multiple obstructions","value":"multi"},
+        {"label":"Knotted loops","value":"knots"}],labelStyle=OPT),
         html.Div([
         dcc.Checklist(id="selected-obstruction-only",
                       options=[{"label":"Show selected obstruction only","value":"on"}],
@@ -842,6 +909,15 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             html.Span(id="homfly-result",style={"fontSize":"13px","fontWeight":"600","color":"#1565c0","marginLeft":"8px"}),
         ],style={"display":"inline-block","marginLeft":"4px"}),
         ],style=ROW)),
+        panel("Knotted loops",
+        html.Div([
+        html.Button("Find knotted loops",id="find-knots-btn",n_clicks=0,style=BTN_PRIMARY),
+        html.Button("< Prev",id="knot-prev-btn",n_clicks=0,style=BTN),
+        html.Button("Next >",id="knot-next-btn",n_clicks=0,style=BTN),
+        html.Span(id="knot-info",style={"fontSize":"13px","color":"#37474f"}),
+        ],style=ROW),
+        html.Div("Knotted: P(unknot) < 0.5 and P(knot) >= 0.48 (HOMFLY, 500 tries). Select the 'Knotted loops' mode to view.",
+                 style={"fontSize":"12px","color":"#607d8b"})),
         panel("Appearance",
         html.Div([
         html.Label("View",style=LABEL),
@@ -868,12 +944,17 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                  style={"width":"260px","paddingBottom":"6px"}),
         ],style=ROW)),
         panel("Export",
-        html.Button("Export 3D to HTML",id="export-3d-btn",n_clicks=0,style=BTN),
-        dcc.Download(id="export-3d-download")),
+        html.Button("3D to HTML",id="export-3d-btn",n_clicks=0,title="Export 3D view to HTML",
+                    style={**BTN,"padding":"5px 8px","whiteSpace":"nowrap"}),
+        dcc.Download(id="export-3d-download"),
+        style={"minWidth":"0","flex":"0 0 auto","width":"110px"}),
     ],style={"display":"flex","flexWrap":"wrap","gap":"12px","alignItems":"stretch","marginTop":"8px"}),
     html.Div(id="edge-color-legend",style={"margin":"8px 0"}),
     dcc.Store(id="graph-version",data=0),
     dcc.Store(id="subgraph-index",data=0),
+    dcc.Store(id="knot-index",data=0),
+    dcc.Store(id="knot-version",data=0),
+    dcc.Interval(id="knot-poll",interval=2000,disabled=True),
     cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,style=container_style(False,False)),
     dcc.Graph(id="graph-3d",style=container_style(True,False),config={"displayModeBar":False}),
     ],style={"fontFamily":FONT,"padding":"8px 14px"})
@@ -915,6 +996,72 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             return (idx+1)%n
         return (idx-1)%n
 
+    def knot_status(idx):
+        job=state.get('knot_job')
+        if job and job['running']:
+            return "Searching for knotted loops..."
+        if job and job.get('error'):
+            return f"Search failed: {job['error']}"
+        loops=state.get('knotted_loops',[])
+        if not loops:
+            return "No knotted loops found." if job else "Click 'Find knotted loops'."
+        k=loops[idx%len(loops)]
+        return (f"{len(loops)} knotted loop(s) - showing {idx%len(loops)+1}: {k['knot']} "
+                f"(P(knot)={k['prob']:.2f}, P(unknot)={k['unknot_prob']:.2f}, {len(k['nodes'])} nodes)")
+
+    def run_knot_job(job,graph,node_pos_3d):
+        try:
+            job['result']=find_knotted_loops(graph,node_pos_3d,tries=500)
+        except Exception as e:
+            job['error']=str(e)
+        job['running']=False
+
+    # The search runs in a thread and is polled, so no long-running callback blocks the
+    # callbacks that depend on knot-index/knot-version (Dash holds those back while an upstream callback is pending).
+    @app.callback(Output("knot-index","data"),Output("knot-version","data"),
+    Output("knot-poll","disabled"),Output("knot-info","children"),
+    Input("find-knots-btn","n_clicks"),Input("knot-prev-btn","n_clicks"),Input("knot-next-btn","n_clicks"),
+    Input("knot-poll","n_intervals"),Input("graph-version","data"),
+    State("knot-index","data"),State("knot-version","data"))
+    def knot_controls(find_clicks,prev_clicks,next_clicks,_poll,_gv,idx,version):
+        trigger=ctx.triggered_id
+        idx=idx or 0
+        job=state.get('knot_job')
+        if trigger is None:
+            return no_update,no_update,no_update,knot_status(idx)
+        if trigger=="find-knots-btn":
+            if job and job['running']:
+                raise PreventUpdate
+            job={'running':True,'graph':state['G']}
+            state['knot_job']=job
+            threading.Thread(target=run_knot_job,args=(job,state['G'],state.get('node_pos_3d')),daemon=True).start()
+            return no_update,no_update,False,knot_status(idx)
+        if trigger=="knot-poll":
+            if job is None or job['running']:
+                return no_update,no_update,False,no_update
+            if job['graph'] is state['G'] and 'result' in job:
+                state['knotted_loops']=job.pop('result')
+                return 0,(version or 0)+1,True,knot_status(0)
+            return no_update,no_update,True,knot_status(idx)
+        if trigger=="graph-version":
+            if job and job['graph'] is not state['G']:
+                state['knot_job']=None
+            return 0,no_update,True,knot_status(0)
+        n=len(state.get('knotted_loops',[]))
+        if n==0:
+            raise PreventUpdate
+        idx=(idx+1)%n if trigger=="knot-next-btn" else (idx-1)%n
+        return idx,no_update,no_update,knot_status(idx)
+
+    def knotted_loop_selection(idx):
+        loops=state.get('knotted_loops',[])
+        if not loops:
+            return None
+        nodes=loops[idx%len(loops)]['nodes']
+        edges={frozenset((nodes[i],nodes[(i+1)%len(nodes)])) for i in range(len(nodes))}
+        edges={e for e in edges if len(e)==2 and state['G'].has_edge(*e)}
+        return set(nodes),edges
+
     @app.callback(Output("subgraph-info","children"),Input("subgraph-index","data"))
     def update_info(idx):
         n=len(state['multi_subgraphs'])
@@ -935,9 +1082,16 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     @app.callback(Output("graph","elements"),
     Input("mode","value"),Input("subgraph-index","data"),Input("graph-version","data"),
     Input("selected-obstruction-only","value"),Input("simplify-subgraph","value"),
-    Input("simplify-method","value"))
-    def update(mode,idx,_version,selected_obstruction_only,simplify_subgraph,simplify_method):
+    Input("simplify-method","value"),Input("knot-index","data"),Input("knot-version","data"))
+    def update(mode,idx,_version,selected_obstruction_only,simplify_subgraph,simplify_method,knot_idx,_kv):
         g=state['G']
+        if mode=="knots":
+            sel=knotted_loop_selection(knot_idx)
+            if sel is None:
+                return build_elements(g,state['pos'])
+            if "on" in (selected_obstruction_only or []):
+                return build_elements(g.edge_subgraph(sel[1]),state['pos'],sel[0],sel[1],True)
+            return build_elements(g,state['pos'],sel[0],sel[1],True)
         if mode=="original":
             return build_elements(g,state['pos'])
         if mode=="highlight":
@@ -982,8 +1136,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     Input("graph-version","data"),Input("show-grid","value"),
     Input("rainbow-backbone","value"),Input("edge-thickness","value"),Input("node-font-size","value"),
     Input("selected-obstruction-only","value"),Input("simplify-subgraph","value"),
-    Input("simplify-method","value"))
-    def update_3d(mode,idx,attr,_version,grid_value,rainbow,thickness,font_size,selected_obstruction_only,simplify_subgraph,simplify_method):
+    Input("simplify-method","value"),Input("knot-index","data"),Input("knot-version","data"))
+    def update_3d(mode,idx,attr,_version,grid_value,rainbow,thickness,font_size,selected_obstruction_only,simplify_subgraph,simplify_method,knot_idx,_kv):
         font_size=font_size or 18
         g=state['G']
         node_pos_3d=state['node_pos_3d']
@@ -993,6 +1147,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         show_grid="grid" in (grid_value or [])
         if mode=="original":
             return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid,thickness=thickness,font_size=font_size)
+        if mode=="knots":
+            sel=knotted_loop_selection(knot_idx)
+            if sel is None:
+                return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid,thickness=thickness,font_size=font_size)
+            if "on" in (selected_obstruction_only or []):
+                return build_3d_figure(g.edge_subgraph(sel[1]),node_pos_3d,sel[0],sel[1],True,edge_colors,show_grid,thickness,font_size)
+            return build_3d_figure(g,node_pos_3d,sel[0],sel[1],True,edge_colors,show_grid,thickness,font_size)
         if mode=="highlight":
             return build_3d_figure(g,node_pos_3d,state['obs_nodes'],state['obs_edges'],True,edge_colors,show_grid,thickness,font_size)
         if mode=="multi":
