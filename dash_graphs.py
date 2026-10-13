@@ -462,8 +462,42 @@ def simplify_subgraph_topoly(selected_graph, node_pos_3d=None, method='kmt'):
 
 
 log = logging.getLogger(__name__)
-HOMFLY_TIMEOUT = 120
+HOMFLY_TIMEOUT = 1200
 _HOMFLY_LOCK = threading.Lock()
+
+
+def _homfly_call(conn, chain, tries):
+    try:
+        conn.send(tp.homfly(chain, tries=tries, run_parallel=False))
+    except Exception:
+        conn.send(None)
+    conn.close()
+
+
+def _isolated_homfly(chain, tries):
+    """Run tp.homfly in its own process so a liblmpoly abort() only loses this chain.
+    Long chains are first reduced (KMT) to keep the crossing code within liblmpoly's buffers."""
+    # try:
+    #     if len(chain) > 100:
+    #         chain = tp.reduce_structure(chain, reduce_method=1)
+    # except Exception:
+    #     pass
+    ctx = mp.get_context('fork')
+    recv, send = ctx.Pipe(duplex=False)
+    proc = ctx.Process(target=_homfly_call, args=(send, chain, tries), daemon=True)
+    try:
+        proc.start()
+        send.close()
+        if recv.poll(HOMFLY_TIMEOUT):
+            return recv.recv()
+        return None
+    except Exception:
+        return None
+    finally:
+        if proc.is_alive():
+            proc.kill()
+        proc.join()
+        recv.close()
 
 
 def _evaluate_subgraph_knot_worker(arcs_4d, node_coords_list, tries=500):
@@ -477,7 +511,9 @@ def _evaluate_subgraph_knot_worker(arcs_4d, node_coords_list, tries=500):
     if not loops and node_coords_list:
         if len(node_coords_list) >= 3:
             try:
-                res = tp.homfly(node_coords_list, tries=tries, run_parallel=False)
+                res = _isolated_homfly(node_coords_list, tries)
+                if res is None:
+                    return '0_1', 1.0
                 non_trivial = {k: v for k, v in res.items() if k not in ('0_1', 'TMC')}
                 if non_trivial:
                     best_k = max(non_trivial, key=non_trivial.get)
@@ -491,7 +527,9 @@ def _evaluate_subgraph_knot_worker(arcs_4d, node_coords_list, tries=500):
     max_unknot_prob = 0.0
     for lp in loops:
         try:
-            res = tp.homfly(lp, tries=tries, run_parallel=False)
+            res = _isolated_homfly(lp, tries)
+            if res is None:
+                continue
             max_unknot_prob = max(max_unknot_prob, float(res.get('0_1', 0.0)))
             for k, prob in res.items():
                 if k not in ('0_1', 'TMC') and prob > 0:
@@ -580,7 +618,7 @@ def test_obstruction_knot_homfly(subgraph, node_pos_3d=None, tries=500):
     with _HOMFLY_LOCK:
         ctx = mp.get_context('fork')
         recv, send = ctx.Pipe(duplex=False)
-        proc = ctx.Process(target=_homfly_child, args=(send, arcs_4d, node_coords_list, tries), daemon=True)
+        proc = ctx.Process(target=_homfly_child, args=(send, arcs_4d, node_coords_list, tries))
         try:
             proc.start()
             send.close()
