@@ -1,7 +1,10 @@
 import colorsys
 import io
+import logging
+import multiprocessing as mp
 import os
 import re
+import threading
 import random
 import numpy as np
 import networkx as nx
@@ -10,6 +13,7 @@ from dash.exceptions import PreventUpdate
 import dash_cytoscape as cyto
 import plotly.graph_objects as go
 import topoly as tp
+from topoly.params import OutputType, ReduceMethod
 from ogdf_python import *
 
 
@@ -457,6 +461,147 @@ def simplify_subgraph_topoly(selected_graph, node_pos_3d=None, method='kmt'):
     return simp_g
 
 
+log = logging.getLogger(__name__)
+HOMFLY_TIMEOUT = 120
+_HOMFLY_LOCK = threading.Lock()
+
+
+def _evaluate_subgraph_knot_worker(arcs_4d, node_coords_list, tries=500):
+    loops = []
+    try:
+        tp_g = tp.Graph(arcs_4d)
+        loops = list(tp_g.find_loops(output_type=OutputType.XYZ, arc_bridges=0))
+    except Exception as e:
+        log.warning(f"Failed to find loops via topoly: {e}")
+
+    if not loops and node_coords_list:
+        if len(node_coords_list) >= 3:
+            try:
+                res = tp.homfly(node_coords_list, tries=tries, run_parallel=False)
+                non_trivial = {k: v for k, v in res.items() if k not in ('0_1', 'TMC')}
+                if non_trivial:
+                    best_k = max(non_trivial, key=non_trivial.get)
+                    return best_k, float(non_trivial[best_k])
+                return '0_1', float(res.get('0_1', 1.0))
+            except Exception:
+                pass
+        return '0_1', 1.0
+
+    all_knots = []
+    max_unknot_prob = 0.0
+    for lp in loops:
+        try:
+            res = tp.homfly(lp, tries=tries, run_parallel=False)
+            max_unknot_prob = max(max_unknot_prob, float(res.get('0_1', 0.0)))
+            for k, prob in res.items():
+                if k not in ('0_1', 'TMC') and prob > 0:
+                    all_knots.append((k, float(prob)))
+        except Exception as e:
+            pass
+
+    if all_knots:
+        best_knot = max(all_knots, key=lambda x: x[1])
+        return best_knot[0], best_knot[1]
+    return '0_1', max_unknot_prob if max_unknot_prob > 0 else 1.0
+
+
+def _homfly_child(conn, arcs_4d, node_coords_list, tries):
+    conn.send(_evaluate_subgraph_knot_worker(arcs_4d, node_coords_list, tries))
+    conn.close()
+
+
+def test_obstruction_knot_homfly(subgraph, node_pos_3d=None, tries=500):
+    """Test if the obstruction subgraph forms a knot using Topoly's HOMFLY algorithm with `tries` tries.
+    Returns (knot_type, probability)."""
+    if subgraph is None or subgraph.number_of_nodes() == 0 or subgraph.number_of_edges() == 0:
+        return None, 0.0
+
+    node_coords = {}
+    for n in subgraph.nodes():
+        coord = subgraph.nodes[n].get('coords')
+        if coord is None and node_pos_3d and n in node_pos_3d:
+            coord = node_pos_3d[n]
+        if coord is not None:
+            node_coords[n] = [float(coord[0]), float(coord[1]), float(coord[2])]
+
+    branch_nodes = [n for n in subgraph.nodes() if subgraph.degree(n) != 2]
+    if not branch_nodes and subgraph.number_of_nodes() > 0:
+        branch_nodes = [next(iter(subgraph.nodes()))]
+
+    visited = set()
+    arcs = []
+    for u in branch_nodes:
+        for v in subgraph.neighbors(u):
+            e = frozenset((u, v))
+            if e in visited:
+                continue
+            visited.add(e)
+            path = [u, v]
+            curr, prev = v, u
+            while subgraph.degree(curr) == 2 and curr not in branch_nodes:
+                nbrs = [n for n in subgraph.neighbors(curr) if n != prev]
+                if not nbrs:
+                    break
+                nxt = nbrs[0]
+                visited.add(frozenset((curr, nxt)))
+                path.append(nxt)
+                prev, curr = curr, nxt
+            arcs.append(path)
+
+    for u, v in subgraph.edges():
+        e = frozenset((u, v))
+        if e not in visited:
+            visited.add(e)
+            path = [u, v]
+            curr, prev = v, u
+            while curr != u:
+                nbrs = [n for n in subgraph.neighbors(curr) if n != prev]
+                if not nbrs:
+                    break
+                nxt = nbrs[0]
+                visited.add(frozenset((curr, nxt)))
+                path.append(nxt)
+                prev, curr = curr, nxt
+            arcs.append(path)
+
+    node_to_id = {n: i for i, n in enumerate(subgraph.nodes())}
+    arcs_4d = []
+    for p in arcs:
+        arc_pts = []
+        for n in p:
+            coord = node_coords.get(n, [0.0, 0.0, 0.0])
+            arc_pts.append([node_to_id[n], float(coord[0]), float(coord[1]), float(coord[2])])
+        arcs_4d.append(arc_pts)
+
+    node_coords_list = [node_coords[n] for n in subgraph.nodes() if n in node_coords]
+
+    # Run in a child process: liblmpoly can abort() (buffer overflow) or hang on large
+    # inputs, which must not take down the app.
+    with _HOMFLY_LOCK:
+        ctx = mp.get_context('fork')
+        recv, send = ctx.Pipe(duplex=False)
+        proc = ctx.Process(target=_homfly_child, args=(send, arcs_4d, node_coords_list, tries), daemon=True)
+        try:
+            proc.start()
+            send.close()
+            if recv.poll(HOMFLY_TIMEOUT):
+                try:
+                    return recv.recv()
+                except EOFError:
+                    log.warning(f"HOMFLY worker crashed (exit code {proc.exitcode})")
+                    return None, 0.0
+            log.warning(f"HOMFLY computation timed out after {HOMFLY_TIMEOUT}s")
+            return None, 0.0
+        except Exception as e:
+            log.warning(f"HOMFLY worker failed: {e}")
+            return None, 0.0
+        finally:
+            if proc.is_alive():
+                proc.kill()
+            proc.join()
+            recv.close()
+
+
 class TopolyReduce:
     """
     Type of Topoly reduction.
@@ -558,7 +703,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         node_pos_3d=get_node_positions_3d(g)
         state.update(G=g,planar=planar,obs=obs,pos=pos,obs_nodes=obs_nodes,obs_edges=obs_edges,
                      obs_pos=obs_pos,multi_subgraphs=multi_subgraphs,node_pos_3d=node_pos_3d,
-                     multi_subgraphs_simplified={})
+                     multi_subgraphs_simplified={},homfly_cache={})
     recompute(G)
 
     def get_simplified_subgraph(idx,selected_graph,method='kmt'):
@@ -649,6 +794,15 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Button("< Prev",id="prev-btn",n_clicks=0,style=BTN),
         html.Button("Next >",id="next-btn",n_clicks=0,style=BTN),
         html.Span(id="subgraph-info",style={"fontSize":"13px","color":"#37474f"}),
+        ],style=ROW),
+        html.Div([
+        dcc.Checklist(id="homfly-test",
+                      options=[{"label":"Test knot (HOMFLY 500)","value":"on"}],
+                      value=[],labelStyle=OPT),
+        html.Button("Run HOMFLY",id="run-homfly-btn",n_clicks=0,style=BTN),
+        dcc.Loading(id="homfly-loading",type="dot",children=[
+            html.Span(id="homfly-result",style={"fontSize":"13px","fontWeight":"600","color":"#1565c0","marginLeft":"8px"}),
+        ],style={"display":"inline-block","marginLeft":"4px"}),
         ],style=ROW)),
         panel("Appearance",
         html.Div([
@@ -823,6 +977,91 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         obs=state['obs']
         obs_pos_3d={n:node_pos_3d[n] for n in obs.nodes()} if not state['planar'] else {}
         return build_3d_figure(obs,obs_pos_3d,edge_colors={**edge_color_map(obs,attr),**rainbow_colors},show_grid=show_grid,thickness=thickness,font_size=font_size)
+
+    @app.callback(
+        Output("homfly-result","children"),
+        Input("run-homfly-btn","n_clicks"),
+        Input("homfly-test","value"),
+        Input("subgraph-index","data"),
+        Input("graph-version","data"),
+        Input("mode","value"),
+        Input("selected-obstruction-only","value"),
+        Input("simplify-subgraph","value"),
+        Input("simplify-method","value"))
+    def update_homfly_knot(run_clicks,homfly_test_val,idx,_version,mode,
+                           selected_obstruction_only,simplify_subgraph,simplify_method):
+        try:
+            triggered=ctx.triggered_id
+        except Exception:
+            triggered=None
+        is_homfly_checked="on" in (homfly_test_val or [])
+        was_run_clicked=bool(run_clicks and run_clicks>0)
+
+        if triggered=="graph-version" and not is_homfly_checked:
+            return ""
+
+        if not is_homfly_checked and not was_run_clicked:
+            return ""
+
+        if not is_homfly_checked and triggered not in ("run-homfly-btn",None):
+            return ""
+
+        if state.get('planar'):
+            return "Planar graph (no obstruction)"
+
+        g=state.get('G')
+        if not g:
+            return ""
+
+        state.setdefault('homfly_cache',{})
+        multi_subgraphs=state.get('multi_subgraphs',[])
+        is_simplified="on" in (simplify_subgraph or [])
+        method=simplify_method or "kmt"
+
+        if mode=="multi" and multi_subgraphs:
+            n=len(multi_subgraphs)
+            actual_idx=idx%n if n>0 else 0
+            sub=multi_subgraphs[actual_idx]
+            sub_g=g.edge_subgraph(sub.edges())
+            if is_simplified:
+                target_g=get_simplified_subgraph(actual_idx,sub_g,method=method)
+            else:
+                target_g=sub_g
+            cache_key=(_version,"multi",actual_idx,is_simplified,method)
+        elif state.get('obs') is not None:
+            obs_g=state['obs']
+            cache_key=(_version,"obs",0,is_simplified,method)
+            if state['homfly_cache'].get(cache_key) is None:
+                target_g=simplify_subgraph_topoly(obs_g,state.get('node_pos_3d'),method=method) if is_simplified else obs_g
+            else:
+                target_g=None
+        elif multi_subgraphs:
+            n=len(multi_subgraphs)
+            actual_idx=idx%n if n>0 else 0
+            sub=multi_subgraphs[actual_idx]
+            sub_g=g.edge_subgraph(sub.edges())
+            if is_simplified:
+                target_g=get_simplified_subgraph(actual_idx,sub_g,method=method)
+            else:
+                target_g=sub_g
+            cache_key=(_version,"multi",actual_idx,is_simplified,method)
+        else:
+            return "No obstruction subgraph found"
+
+        cached=state.setdefault('homfly_cache',{}).get(cache_key)
+        if cached is not None:
+            knot_type,prob=cached
+        else:
+            knot_type,prob=test_obstruction_knot_homfly(target_g,state.get('node_pos_3d'),tries=500)
+            if knot_type is not None:
+                state['homfly_cache'][cache_key]=(knot_type,prob)
+
+        if knot_type is None:
+            return "HOMFLY test failed (crashed, timed out or inconclusive)"
+        if knot_type=='0_1':
+            return f"knot_type: 0_1 (unknot), probability: {prob:.3f}"
+        return f"knot_type: {knot_type}, probability: {prob:.3f}"
+
     return app
 
 SIMPLIFIED_BOND_TYPES={'disulf':'disulfide','metalc':'ion'}
