@@ -345,7 +345,7 @@ def find_multiple_kuratowski_subgraphs_ogdf(graph):
     return subgraphs
 
 
-def find_multiple_kuratowski_subgraphs_sage(graph):
+def _find_multiple_kuratowski_subgraphs_sage(graph):
     """Finds distinct Kuratowski subgraphs with SageMath's Graph.is_planar(kuratowski=True),
     which returns one subgraph per call, so an edge of each found subgraph is removed before searching again."""
     try:
@@ -363,6 +363,45 @@ def find_multiple_kuratowski_subgraphs_sage(graph):
         subgraphs.append(sub)
         G.delete_edge(*next(iter(sub.edges())))
     return subgraphs
+
+
+def _sage_kuratowski_worker(conn, graph):
+    try:
+        import os
+        import sys
+
+        print("Python:", sys.executable)
+        print("Working directory:", os.getcwd())
+        print("PYTHONPATH:", os.environ.get("PYTHONPATH"))
+        print("sys.path:", sys.path)
+        conn.send((True, _find_multiple_kuratowski_subgraphs_sage(graph)))
+    except Exception as e:
+        conn.send((False, str(e)))
+    finally:
+        conn.close()
+
+
+def find_multiple_kuratowski_subgraphs_sage(graph):
+    """Run SageMath in a child process, where its signal handlers can be installed."""
+    ctx = mp.get_context('fork')
+    recv, send = ctx.Pipe(duplex=False)
+    proc = ctx.Process(target=_sage_kuratowski_worker, args=(send, graph), daemon=True)
+    try:
+        proc.start()
+        send.close()
+        try:
+            succeeded, result = recv.recv()
+        except EOFError as e:
+            raise RuntimeError(f"SageMath worker crashed (exit code {proc.exitcode})") from e
+        if not succeeded:
+            raise RuntimeError(f"SageMath worker failed: {result}")
+        return result
+    finally:
+        send.close()
+        if proc.is_alive():
+            proc.kill()
+        proc.join()
+        recv.close()
 
 
 def find_obstructions(graph, method="ogdf"):
