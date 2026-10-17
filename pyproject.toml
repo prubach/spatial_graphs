@@ -1,0 +1,10 @@
+[project]
+name = "spatial-graphs"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "dash>=4.4.0",
+    "dash-cytoscape>=1.0.2",
+    "networkx>=3.6.1",
+    "topoly>=1.1.0",
+]
