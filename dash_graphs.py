@@ -603,10 +603,10 @@ def classify_homfly(res, max_unknot=0.5, min_knot=0.48):
 KNOT_CACHE_DIR = os.environ.get('KNOT_CACHE_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'knot_cache'))
 
 
-def _knot_cache_path(graph, node_pos_3d, tries):
+def _knot_cache_path(graph, node_pos_3d, tries, kind=''):
     """Cache file path keyed by a hash of the graph's edges, node coordinates and HOMFLY tries."""
     import hashlib
-    h = hashlib.sha256(f'v1|{tries}'.encode())
+    h = hashlib.sha256(f'v1|{tries}|{kind}'.encode())
     for n in sorted(graph.nodes(), key=str):
         c = graph.nodes[n].get('coords')
         if c is None and node_pos_3d is not None:
@@ -617,14 +617,16 @@ def _knot_cache_path(graph, node_pos_3d, tries):
     return os.path.join(KNOT_CACHE_DIR, h.hexdigest() + '.json')
 
 
-def find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None):
-    """Cached wrapper around _find_knotted_loops; results are stored as JSON files in KNOT_CACHE_DIR."""
+def find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, params=None):
+    """Cached wrapper around _find_knotted_loops; results are stored as JSON files in KNOT_CACHE_DIR
+    together with the `params` (PDB ID, source, reduction, numbering, ...) they were computed for."""
     import json
     path = _knot_cache_path(graph, node_pos_3d, tries)
     by_str = {str(n): n for n in graph.nodes()}
     try:
         with open(path) as f:
-            loops = json.load(f)
+            data = json.load(f)
+        loops = data['loops'] if isinstance(data, dict) else data
         for lp in loops:
             lp['nodes'] = [by_str[n] for n in lp['nodes']]
         return loops
@@ -635,11 +637,38 @@ def find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None):
         os.makedirs(KNOT_CACHE_DIR, exist_ok=True)
         tmp = f'{path}.{os.getpid()}.tmp'
         with open(tmp, 'w') as f:
-            json.dump([{**lp, 'nodes': [str(n) for n in lp['nodes']]} for lp in loops], f)
+            json.dump(dict(params=dict(params or {}, tries=tries, nodes=graph.number_of_nodes(),
+                                       edges=graph.number_of_edges()),
+                           loops=[{**lp, 'nodes': [str(n) for n in lp['nodes']]} for lp in loops]), f, indent=1)
         os.replace(tmp, path)
     except OSError:
         logging.warning('Could not write knot cache %s', path)
     return loops
+
+
+def cached_subgraph_homfly(subgraph, node_pos_3d=None, tries=500, params=None):
+    """File-cached test_obstruction_knot_homfly; failed/timed-out runs (knot_type None) are not cached."""
+    import json
+    path = _knot_cache_path(subgraph, node_pos_3d, tries, kind='subgraph')
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data['knot_type'], data['prob']
+    except (OSError, ValueError, KeyError):
+        pass
+    knot_type, prob = test_obstruction_knot_homfly(subgraph, node_pos_3d, tries=tries)
+    if knot_type is not None:
+        try:
+            os.makedirs(KNOT_CACHE_DIR, exist_ok=True)
+            tmp = f'{path}.{os.getpid()}.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(dict(params=dict(params or {}, tries=tries, nodes=subgraph.number_of_nodes(),
+                                           edges=subgraph.number_of_edges()),
+                               knot_type=knot_type, prob=prob), f, indent=1)
+            os.replace(tmp, path)
+        except OSError:
+            logging.warning('Could not write HOMFLY cache %s', path)
+    return knot_type, prob
 
 
 def _find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None):
@@ -882,12 +911,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                     obs_pos={n:pos[n] for n in obs.nodes()} if not planar else {},
                     multi_subgraphs=multi_subgraphs,multi_subgraphs_simplified={},homfly_cache={})
 
-    def recompute(g,method="ogdf"):
+    def recompute(g,method="ogdf",params=None):
         pos=nx.spring_layout(g,seed=1)
         node_pos_3d=get_node_positions_3d(g)
-        state.update(G=g,pos=pos,node_pos_3d=node_pos_3d,knotted_loops=[],obs_method=method,
+        state.update(G=g,pos=pos,node_pos_3d=node_pos_3d,knotted_loops=[],obs_method=method,graph_params=params or {},
                      **compute_obstructions(g,pos,method))
-    recompute(G)
+    recompute(G,params=dict(pdbid=pdbid or None,source="topoly" if is_topoly else "simplified",
+                            reduce=str(TopolyReduce.INTERNAL),numbering="auth",merge_residues=False))
 
     def get_simplified_subgraph(idx,selected_graph,method='kmt'):
         cache_key=(idx,method)
@@ -1066,7 +1096,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         print(f'nodes: {sorted(g.nodes())}')
         print(f'edges: {sorted(g.edges())}')
         print('--------------------------------------------')
-        recompute(g,obs_method or "ogdf")
+        recompute(g,obs_method or "ogdf",dict(pdbid=pdbid_value,source=source_type,reduce=str(reduce_value),
+                                               numbering=numbering,merge_residues=bool(merge)))
         options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(g)]
         return make_title(f"{pdbid_value}-{tit}",g),options,"type" if "type" in edge_attr_keys(g) else "none","original",0,(version or 0)+1
 
@@ -1108,9 +1139,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         return (f"{len(loops)} knotted loop(s) - showing {idx%len(loops)+1}: {k['knot']} "
                 f"(P(knot)={k['prob']:.2f}, P(unknot)={k['unknot_prob']:.2f}, {len(k['nodes'])} nodes)")
 
-    def run_knot_job(job,graph,node_pos_3d):
+    def run_knot_job(job,graph,node_pos_3d,params):
         try:
-            job['result']=find_knotted_loops(graph,node_pos_3d,tries=500)
+            job['result']=find_knotted_loops(graph,node_pos_3d,tries=500,params=params)
         except Exception as e:
             job['error']=str(e)
         job['running']=False
@@ -1119,38 +1150,40 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     # callbacks that depend on knot-index/knot-version (Dash holds those back while an upstream callback is pending).
     @app.callback(Output("knot-index","data"),Output("knot-version","data"),
     Output("knot-poll","disabled"),Output("knot-info","children"),
+    Output("mode","value",allow_duplicate=True),
     Input("find-knots-btn","n_clicks"),Input("knot-prev-btn","n_clicks"),Input("knot-next-btn","n_clicks"),
     Input("knot-poll","n_intervals"),Input("graph-version","data"),
-    State("knot-index","data"),State("knot-version","data"))
+    State("knot-index","data"),State("knot-version","data"),
+    prevent_initial_call="initial_duplicate")
     def knot_controls(find_clicks,prev_clicks,next_clicks,_poll,_gv,idx,version):
         trigger=ctx.triggered_id
         idx=idx or 0
         job=state.get('knot_job')
         if trigger is None:
-            return no_update,no_update,no_update,knot_status(idx)
+            return no_update,no_update,no_update,knot_status(idx),no_update
         if trigger=="find-knots-btn":
             if job and job['running']:
                 raise PreventUpdate
             job={'running':True,'graph':state['G']}
             state['knot_job']=job
-            threading.Thread(target=run_knot_job,args=(job,state['G'],state.get('node_pos_3d')),daemon=True).start()
-            return no_update,no_update,False,knot_status(idx)
+            threading.Thread(target=run_knot_job,args=(job,state['G'],state.get('node_pos_3d'),dict(state.get('graph_params',{}))),daemon=True).start()
+            return no_update,no_update,False,knot_status(idx),"knots"
         if trigger=="knot-poll":
             if job is None or job['running']:
-                return no_update,no_update,False,no_update
+                return no_update,no_update,False,no_update,no_update
             if job['graph'] is state['G'] and 'result' in job:
                 state['knotted_loops']=job.pop('result')
-                return 0,(version or 0)+1,True,knot_status(0)
-            return no_update,no_update,True,knot_status(idx)
+                return 0,(version or 0)+1,True,knot_status(0),"knots"
+            return no_update,no_update,True,knot_status(idx),no_update
         if trigger=="graph-version":
             if job and job['graph'] is not state['G']:
                 state['knot_job']=None
-            return 0,no_update,True,knot_status(0)
+            return 0,no_update,True,knot_status(0),no_update
         n=len(state.get('knotted_loops',[]))
         if n==0:
             raise PreventUpdate
         idx=(idx+1)%n if trigger=="knot-next-btn" else (idx-1)%n
-        return idx,no_update,no_update,knot_status(idx)
+        return idx,no_update,no_update,knot_status(idx),no_update
 
     def knotted_loop_selection(idx):
         loops=state.get('knotted_loops',[])
@@ -1350,7 +1383,11 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if cached is not None:
             knot_type,prob=cached
         else:
-            knot_type,prob=test_obstruction_knot_homfly(target_g,state.get('node_pos_3d'),tries=500)
+            knot_type,prob=cached_subgraph_homfly(target_g,state.get('node_pos_3d'),tries=500,
+                                                    params=dict(state.get('graph_params',{}),view=cache_key[1],
+                                                                subgraph_index=cache_key[2],simplified=is_simplified,
+                                                                simplify_method=method if is_simplified else None,
+                                                                obstruction_finder=state.get('obs_method')))
             if knot_type is not None:
                 state['homfly_cache'][cache_key]=(knot_type,prob)
 

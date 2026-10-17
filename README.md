@@ -13,3 +13,13 @@ The app is served at `/spatialgraph/` by default. Override with the `CONTEXT_PAT
     mod_wsgi-express start-server wsgi.py --port 8014
 
 The app is then available at `http://host:8014/spatialgraph/`.
+
+
+## Knotted loops vs "Run HOMFLY" button/"Test knot (HOMFLY 500)" checkbox
+
+Knotted loops are detected on the whole loaded graph, that may be the simplified version selected in the "Simplification" dropdown. The result appears in the "Knotted loops" section of the right panel.
+Knotted loops are detected automatically when the graph is loaded or changed, and the result appears in the "Knotted loops" section of the right panel.
+
+"Run HOMFLY" vs "Test knot (HOMFLY 500)": both run the same 500-try HOMFLY test on the currently shown obstruction subgraph, and the result appears in the same place.
+- "Test knot" checkbox: runs automatically whenever the shown subgraph changes. That covers switching mode, moving to the previous or next subgraph, changing simplification, and loading a graph.
+- "Run HOMFLY" button: runs it once on demand when the checkbox is off. The result then clears on the next change.
