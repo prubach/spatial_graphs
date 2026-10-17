@@ -367,13 +367,14 @@ def _find_multiple_kuratowski_subgraphs_sage(graph):
 
 def _sage_kuratowski_worker(conn, graph):
     try:
+        from sage.all import ZZ
+        from sage.graphs.graph import Graph as SageGraph
         import os
         import sys
-
-        print("Python:", sys.executable)
-        print("Working directory:", os.getcwd())
-        print("PYTHONPATH:", os.environ.get("PYTHONPATH"))
-        print("sys.path:", sys.path)
+        # print("Python:", sys.executable)
+        # print("Working directory:", os.getcwd())
+        # print("PYTHONPATH:", os.environ.get("PYTHONPATH"))
+        # print("sys.path:", sys.path)
         conn.send((True, _find_multiple_kuratowski_subgraphs_sage(graph)))
     except Exception as e:
         conn.send((False, str(e)))
