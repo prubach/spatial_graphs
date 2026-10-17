@@ -31,6 +31,7 @@ Knotted loops are detected automatically when the graph is loaded or changed, an
 curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
 conda init
 conda create -n sage sage python=3.13
+conda activate sage
 conda install --yes --file requirements.txt
 
 pip install -r requirements.txt 
