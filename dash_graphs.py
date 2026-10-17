@@ -6,6 +6,7 @@ import os
 import re
 import threading
 import random
+from urllib.parse import quote
 import numpy as np
 import networkx as nx
 from dash import Dash, html, dcc, Input, Output, State, ctx, no_update
@@ -57,6 +58,98 @@ def build_elements(graph,pos,obs_nodes=set(),obs_edges=set(),highlight=False,cls
         if highlight and frozenset((u,v)) in obs_edges: e["classes"]=cls
         els.append(e)
     return els
+
+
+def _crossing_overlay_elements(elements, node_pos_3d, edge_thickness=1.0):
+    """Add visual overpasses for crossings in a 2D drawing, ranked by interpolated z."""
+    positions = {}
+    for element in elements:
+        data = element.get("data", {})
+        if "source" not in data:
+            positions[data["id"]] = element["position"]
+
+    edges = []
+    for element in elements:
+        data = element.get("data", {})
+        if "source" in data and "target" in data:
+            u, v = data["source"], data["target"]
+            if u in positions and v in positions:
+                edges.append((u, v))
+
+    def cross(a, b):
+        return a[0] * b[1] - a[1] * b[0]
+
+    markers = []
+    for i, (u, v) in enumerate(edges):
+        if u not in node_pos_3d or v not in node_pos_3d:
+            continue
+        p = positions[u]
+        q = positions[v]
+        r = (q["x"] - p["x"], q["y"] - p["y"])
+        for s_idx in range(i + 1, len(edges)):
+            a, b = edges[s_idx]
+            if {u, v} & {a, b} or a not in node_pos_3d or b not in node_pos_3d:
+                continue
+            c = positions[a]
+            d = positions[b]
+            s = (d["x"] - c["x"], d["y"] - c["y"])
+            denominator = cross(r, s)
+            if abs(denominator) < 1e-12:
+                continue
+            offset = (c["x"] - p["x"], c["y"] - p["y"])
+            t = cross(offset, s) / denominator
+            other_t = cross(offset, r) / denominator
+            if not (1e-9 < t < 1 - 1e-9 and 1e-9 < other_t < 1 - 1e-9):
+                continue
+
+            z1 = node_pos_3d[u][2] + t * (node_pos_3d[v][2] - node_pos_3d[u][2])
+            z2 = node_pos_3d[a][2] + other_t * (node_pos_3d[b][2] - node_pos_3d[a][2])
+            if abs(z1 - z2) < 1e-9:
+                continue
+            over_start, over_end = (p, q) if z1 > z2 else (c, d)
+            under_start, under_end = (c, d) if z1 > z2 else (p, q)
+
+            def direction(start, end):
+                dx, dy = end["x"] - start["x"], end["y"] - start["y"]
+                length = (dx * dx + dy * dy) ** 0.5
+                return (dx / length, dy / length) if length else (1.0, 0.0)
+
+            over_dx, over_dy = direction(over_start, over_end)
+            under_dx, under_dy = direction(under_start, under_end)
+            svg = (
+                '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
+                f'<path d="M {12 - 10 * under_dx:.2f} {12 - 10 * under_dy:.2f} '
+                f'L {12 + 10 * under_dx:.2f} {12 + 10 * under_dy:.2f}" '
+                f'stroke="white" stroke-width="{8 * edge_thickness:.2f}" stroke-linecap="round"/>'
+                f'<path d="M {12 - 9 * over_dx:.2f} {12 - 9 * over_dy:.2f} '
+                f'L {12 + 9 * over_dx:.2f} {12 + 9 * over_dy:.2f}" '
+                f'stroke="#222" stroke-width="{3 * edge_thickness:.2f}" stroke-linecap="round"/>'
+                '</svg>'
+            )
+            x = p["x"] + t * r[0]
+            y = p["y"] + t * r[1]
+            markers.append({
+                "data": {
+                    "id": f"crossing-marker-{len(markers)}",
+                    "image": f"data:image/svg+xml;utf8,{quote(svg, safe='')}",
+                },
+                "position": {"x": x, "y": y},
+                "style": {"width": 24 * edge_thickness, "height": 24 * edge_thickness},
+                "classes": "crossing-marker",
+                "selectable": False,
+                "grabbable": False,
+            })
+    return markers
+
+
+def edge_thickness_stylesheet(thickness):
+    """Return Cytoscape edge widths scaled consistently with the 3D thickness control."""
+    return [
+        {"selector": "edge", "style": {"width": 5 * thickness}},
+        {"selector": "edge.obstruction", "style": {"width": 16 * thickness}},
+        {"selector": "edge.knotted", "style": {"width": 16 * thickness}},
+    ]
+
 
 BASE_STYLE=[
 #{"selector":"node","style":{"label":"data(label)","background-color":"#1976d2","color":"white","width":40,"height":40,"font-size":"10px"}},
@@ -985,8 +1078,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                     multi_subgraphs=multi_subgraphs,multi_subgraphs_simplified={},homfly_cache={})
 
     def recompute(g,method="ogdf",params=None):
-        pos=nx.spring_layout(g,seed=1)
         node_pos_3d=get_node_positions_3d(g)
+        pos={n:(coord[0],coord[1]) for n,coord in node_pos_3d.items()}
         state.update(G=g,pos=pos,node_pos_3d=node_pos_3d,knotted_loops=[],obs_method=method,graph_params=params or {},
                      **compute_obstructions(g,pos,method))
     recompute(G,params=dict(pdbid=pdbid or None,source="topoly" if is_topoly else "simplified",
@@ -1278,36 +1371,53 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         return f"Found {n} Kuratowski subgraph(s) - showing {idx+1} of {n}: {kind}"
 
     @app.callback(Output("graph","stylesheet"),Output("edge-color-legend","children"),
-    Input("edge-color-attr","value"),Input("graph-version","data"),Input("rainbow-backbone","value"),Input("node-font-size","value"))
-    def update_edge_colors(attr,_version,rainbow,font_size):
+    Input("edge-color-attr","value"),Input("graph-version","data"),Input("rainbow-backbone","value"),Input("node-font-size","value"),
+    Input("view-dim","value"),Input("edge-thickness","value"))
+    def update_edge_colors(attr,_version,rainbow,font_size,view_dim,thickness_index):
         g=state['G']
+        thickness=EDGE_THICKNESS_VALUES[thickness_index] if thickness_index is not None else 1.0
         rainbow_rules=[{"selector":f'edge[source = "{u}"][target = "{v}"]',"style":{"line-color":c}}
                        for (u,v),c in ((tuple(e),c) for e,c in rainbow_backbone_map(g).items())] if rainbow else []
         rainbow_rules+=[{"selector":f'edge[source = "{v}"][target = "{u}"]',"style":r["style"]} for r in rainbow_rules for u,v in [(r["selector"].split('"')[3],r["selector"].split('"')[1])]]
-        stylesheet=BASE_STYLE+[{"selector":"node","style":{"font-size":f"{font_size or 18}px"}}]+edge_color_stylesheet(g,attr)+rainbow_rules+OBSTRUCTION_STYLE+KNOT_STYLE
-        return stylesheet,edge_color_legend(g,attr)
+        stylesheet=BASE_STYLE+[{"selector":"node","style":{"font-size":f"{font_size or 18}px"}},
+            {"selector":".crossing-marker","style":{"width":24,"height":24,"shape":"rectangle",
+             "background-opacity":0,"background-image":"data(image)","background-fit":"contain",
+             "border-width":0}}]+edge_color_stylesheet(g,attr)+rainbow_rules+OBSTRUCTION_STYLE+KNOT_STYLE
+        stylesheet+=edge_thickness_stylesheet(thickness)
+        legend=[edge_color_legend(g,attr)]
+        if view_dim=="2d":
+            legend.append(html.Span("Crossings: dark line passes over; white gap marks under.",
+                                    style={"fontSize":"12px","color":"#607d8b","marginLeft":"12px"}))
+        return stylesheet,html.Div(legend)
 
     @app.callback(Output("graph","elements"),
     Input("mode","value"),Input("subgraph-index","data"),Input("graph-version","data"),
     Input("selected-obstruction-only","value"),Input("simplify-subgraph","value"),
-    Input("simplify-method","value"),Input("knot-index","data"),Input("knot-version","data"))
-    def update(mode,idx,_version,selected_obstruction_only,simplify_subgraph,simplify_method,knot_idx,_kv):
+    Input("simplify-method","value"),Input("knot-index","data"),Input("knot-version","data"),
+    Input("view-dim","value"),Input("edge-thickness","value"))
+    def update(mode,idx,_version,selected_obstruction_only,simplify_subgraph,simplify_method,knot_idx,_kv,view_dim,_thickness_index):
         g=state['G']
+        def finalize(elements):
+            if view_dim != "2d":
+                return elements
+            node_pos_3d={str(n): coordinates for n,coordinates in state['node_pos_3d'].items()}
+            thickness=EDGE_THICKNESS_VALUES[_thickness_index] if _thickness_index is not None else 1.0
+            return elements + _crossing_overlay_elements(elements,node_pos_3d,thickness)
         if mode=="knots":
             sel=knotted_loop_selection(knot_idx)
             if sel is None:
-                return build_elements(g,state['pos'])
+                return finalize(build_elements(g,state['pos']))
             if "on" in (selected_obstruction_only or []):
-                return build_elements(g.edge_subgraph(sel[1]),state['pos'],sel[0],sel[1],True,"knotted")
-            return build_elements(g,state['pos'],sel[0],sel[1],True,"knotted")
+                return finalize(build_elements(g.edge_subgraph(sel[1]),state['pos'],sel[0],sel[1],True,"knotted"))
+            return finalize(build_elements(g,state['pos'],sel[0],sel[1],True,"knotted"))
         if mode=="original":
-            return build_elements(g,state['pos'])
+            return finalize(build_elements(g,state['pos']))
         if mode=="highlight":
-            return build_elements(g,state['pos'],state['obs_nodes'],state['obs_edges'],True)
+            return finalize(build_elements(g,state['pos'],state['obs_nodes'],state['obs_edges'],True))
         if mode=="multi":
             multi_subgraphs=state['multi_subgraphs']
             if not multi_subgraphs:
-                return build_elements(g,state['pos'])
+                return finalize(build_elements(g,state['pos']))
             sub=multi_subgraphs[idx]
             sub_nodes=set(sub.nodes())
             sub_edges={frozenset(e) for e in sub.edges()}
@@ -1315,10 +1425,10 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                 selected_graph=g.edge_subgraph(sub.edges())
                 if "on" in (simplify_subgraph or []):
                     simp_g=get_simplified_subgraph(idx,selected_graph,method=simplify_method or "kmt")
-                    return build_elements(simp_g,state['pos'],set(simp_g.nodes()),{frozenset(e) for e in simp_g.edges()},True)
-                return build_elements(selected_graph,state['pos'],sub_nodes,sub_edges,True)
-            return build_elements(g,state['pos'],sub_nodes,sub_edges,True)
-        return build_elements(state['obs'],state['obs_pos'])
+                    return finalize(build_elements(simp_g,state['pos'],set(simp_g.nodes()),{frozenset(e) for e in simp_g.edges()},True))
+                return finalize(build_elements(selected_graph,state['pos'],sub_nodes,sub_edges,True))
+            return finalize(build_elements(g,state['pos'],sub_nodes,sub_edges,True))
+        return finalize(build_elements(state['obs'],state['obs_pos']))
 
     @app.callback(Output("graph","style"),Output("graph-3d","style"),
     Input("view-dim","value"),Input("show-grid","value"))
