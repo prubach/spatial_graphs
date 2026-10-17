@@ -118,12 +118,12 @@ def _crossing_overlay_elements(elements, node_pos_3d, edge_thickness=1.0):
             under_dx, under_dy = direction(under_start, under_end)
             svg = (
                 '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
-                f'<path d="M {12 - 10 * under_dx:.2f} {12 - 10 * under_dy:.2f} '
-                f'L {12 + 10 * under_dx:.2f} {12 + 10 * under_dy:.2f}" '
-                f'stroke="white" stroke-width="{8 * edge_thickness:.2f}" stroke-linecap="round"/>'
+                f'<path d="M {12 - 7.5 * under_dx:.2f} {12 - 7.5 * under_dy:.2f} '
+                f'L {12 + 7.5 * under_dx:.2f} {12 + 7.5 * under_dy:.2f}" '
+                'stroke="white" stroke-width="9" stroke-linecap="round"/>'
                 f'<path d="M {12 - 9 * over_dx:.2f} {12 - 9 * over_dy:.2f} '
                 f'L {12 + 9 * over_dx:.2f} {12 + 9 * over_dy:.2f}" '
-                f'stroke="#222" stroke-width="{3 * edge_thickness:.2f}" stroke-linecap="round"/>'
+                'stroke="#222" stroke-width="5" stroke-linecap="round"/>'
                 '</svg>'
             )
             x = p["x"] + t * r[0]
