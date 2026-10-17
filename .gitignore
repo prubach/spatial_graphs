@@ -2,3 +2,4 @@
 *.venv
 *.pyc
 uv.lockknot_cache/
+knot_cache
