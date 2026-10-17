@@ -405,6 +405,39 @@ def find_multiple_kuratowski_subgraphs_sage(graph):
         recv.close()
 
 
+def kuratowski_subgraph_type(subgraph):
+    """Identify a Kuratowski subdivision by suppressing its degree-2 path vertices."""
+    branch_nodes = {node for node, degree in subgraph.degree() if degree != 2}
+    if not branch_nodes:
+        return "unknown Kuratowski type"
+
+    core = nx.Graph()
+    core.add_nodes_from(branch_nodes)
+    visited_edges = set()
+    for start in branch_nodes:
+        for neighbor in subgraph.neighbors(start):
+            first_edge = frozenset((start, neighbor))
+            if first_edge in visited_edges:
+                continue
+            visited_edges.add(first_edge)
+            previous, current = start, neighbor
+            while current not in branch_nodes:
+                next_nodes = [node for node in subgraph.neighbors(current) if node != previous]
+                if len(next_nodes) != 1:
+                    break
+                following = next_nodes[0]
+                visited_edges.add(frozenset((current, following)))
+                previous, current = current, following
+            if current in branch_nodes:
+                core.add_edge(start, current)
+
+    if nx.is_isomorphic(core, nx.complete_graph(5)):
+        return "K_5 subdivision (implies a K_5 minor)"
+    if nx.is_isomorphic(core, nx.complete_bipartite_graph(3, 3)):
+        return "K_3,3 subdivision (implies a K_3,3 minor)"
+    return "unknown Kuratowski type"
+
+
 def find_obstructions(graph, method="ogdf"):
     """Return the Kuratowski subgraphs of `graph` found by `method` ('ogdf' or 'sage')."""
     if method == "sage":
@@ -1236,10 +1269,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
 
     @app.callback(Output("subgraph-info","children"),Input("subgraph-index","data"))
     def update_info(idx):
-        n=len(state['multi_subgraphs'])
+        subgraphs=state['multi_subgraphs']
+        n=len(subgraphs)
         if n==0:
             return "No additional Kuratowski subgraphs found."
-        return f"Found {n} Kuratowski subgraph(s) - showing {idx+1} of {n}"
+        idx=(idx or 0)%n
+        kind=kuratowski_subgraph_type(subgraphs[idx])
+        return f"Found {n} Kuratowski subgraph(s) - showing {idx+1} of {n}: {kind}"
 
     @app.callback(Output("graph","stylesheet"),Output("edge-color-legend","children"),
     Input("edge-color-attr","value"),Input("graph-version","data"),Input("rainbow-backbone","value"),Input("node-font-size","value"))
