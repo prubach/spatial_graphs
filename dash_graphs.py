@@ -44,17 +44,17 @@ def create_graph(seed=42,n_cliques=5,n_bicliques=6,n_random_edges=10):
         u,v=random.sample(nodes,2); G.add_edge(u,v)
     return G
 
-def build_elements(graph,pos,obs_nodes=set(),obs_edges=set(),highlight=False):
+def build_elements(graph,pos,obs_nodes=set(),obs_edges=set(),highlight=False,cls="obstruction"):
     els=[]
     for n in graph.nodes():
         e={"data":{"id":str(n),"label":str(n)},"position":{"x":pos[n][0]*800,"y":pos[n][1]*800}}
-        if highlight and n in obs_nodes: e["classes"]="obstruction"
+        if highlight and n in obs_nodes: e["classes"]=cls
         els.append(e)
     for u,v,data in graph.edges(data=True):
         edata={"source":str(u),"target":str(v)}
         edata.update(data)
         e={"data":edata}
-        if highlight and frozenset((u,v)) in obs_edges: e["classes"]="obstruction"
+        if highlight and frozenset((u,v)) in obs_edges: e["classes"]=cls
         els.append(e)
     return els
 
@@ -81,7 +81,13 @@ OBSTRUCTION_STYLE=[
 {"selector":"edge.obstruction","style":{"background-color":"crimson","line-color":"crimson","border-width":4,"border-color":"gold",
                                     "width":16}},
 ]
-STYLE=BASE_STYLE+OBSTRUCTION_STYLE
+KNOT_COLOR="darkorange"
+KNOT_STYLE=[
+{"selector":".knotted","style":{"background-color":KNOT_COLOR,"line-color":KNOT_COLOR,"border-width":4,"border-color":"#4a148c",
+                                "width":60,"height":60,}},
+{"selector":"edge.knotted","style":{"background-color":KNOT_COLOR,"line-color":KNOT_COLOR,"width":16}},
+]
+STYLE=BASE_STYLE+OBSTRUCTION_STYLE+KNOT_STYLE
 
 # CSS grid background, toggled behind the 2D/3D graph views.
 GRID_BACKGROUND={
@@ -230,7 +236,7 @@ def tube_mesh(edges,node_pos,color,radius,sides=8):
         flatshading=False,lighting=dict(ambient=0.45,diffuse=0.8,specular=0.3,roughness=0.5),
         hoverinfo="none",showlegend=False)
 
-def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=False,edge_colors=None,show_grid=False,thickness=1.0,font_size=18):
+def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=False,edge_colors=None,show_grid=False,thickness=1.0,font_size=18,hl_color="crimson"):
     edge_colors=edge_colors or {}
     by_color={}
     for u,v in graph.edges():
@@ -245,12 +251,12 @@ def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=Fal
         traces.append(tube_mesh(edges,node_pos,color,radius))
     if highlight and obs_edges:
         obs=[(u,v) for u,v in graph.edges() if frozenset((u,v)) in obs_edges]
-        traces.append(tube_mesh(obs,node_pos,"crimson",radius*2))
+        traces.append(tube_mesh(obs,node_pos,hl_color,radius*2))
     node_x,node_y,node_z,node_color,node_text=[],[],[],[],[]
     for n in graph.nodes():
         x,y,z=node_pos[n]
         node_x.append(x); node_y.append(y); node_z.append(z)
-        node_color.append("crimson" if highlight and n in obs_nodes else "#1976d2")
+        node_color.append(hl_color if highlight and n in obs_nodes else "#1976d2")
         node_text.append(str(n))
     traces.append(go.Scatter3d(x=node_x,y=node_y,z=node_z,mode="markers+text",
         text=node_text,textposition="top center",textfont=dict(size=font_size,color="#111"),
@@ -337,6 +343,33 @@ def find_multiple_kuratowski_subgraphs_ogdf(graph):
             sub.add_edge(u, v)
         subgraphs.append(sub)
     return subgraphs
+
+
+def find_multiple_kuratowski_subgraphs_sage(graph):
+    """Finds distinct Kuratowski subgraphs with SageMath's Graph.is_planar(kuratowski=True),
+    which returns one subgraph per call, so an edge of each found subgraph is removed before searching again."""
+    try:
+        from sage.graphs.graph import Graph as SageGraph
+    except ImportError as e:
+        raise RuntimeError("SageMath is not available in this Python environment (cannot import 'sage')") from e
+    G = SageGraph([list(graph.nodes()), list(graph.edges())], format='vertices_and_edges')
+    subgraphs = []
+    while True:
+        planar, cert = G.is_planar(kuratowski=True)
+        if planar:
+            break
+        sub = nx.Graph()
+        sub.add_edges_from((u, v) for u, v, *_ in cert.edges(sort=False))
+        subgraphs.append(sub)
+        G.delete_edge(*next(iter(sub.edges())))
+    return subgraphs
+
+
+def find_obstructions(graph, method="ogdf"):
+    """Return the Kuratowski subgraphs of `graph` found by `method` ('ogdf' or 'sage')."""
+    if method == "sage":
+        return find_multiple_kuratowski_subgraphs_sage(graph)
+    return find_multiple_kuratowski_subgraphs_ogdf(graph)
 
 
 def simplify_subgraph_topoly(selected_graph, node_pos_3d=None, method='kmt'):
@@ -567,7 +600,49 @@ def classify_homfly(res, max_unknot=0.5, min_knot=0.48):
     return None
 
 
+KNOT_CACHE_DIR = os.environ.get('KNOT_CACHE_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'knot_cache'))
+
+
+def _knot_cache_path(graph, node_pos_3d, tries):
+    """Cache file path keyed by a hash of the graph's edges, node coordinates and HOMFLY tries."""
+    import hashlib
+    h = hashlib.sha256(f'v1|{tries}'.encode())
+    for n in sorted(graph.nodes(), key=str):
+        c = graph.nodes[n].get('coords')
+        if c is None and node_pos_3d is not None:
+            c = node_pos_3d.get(n)
+        h.update(f'{n}:{None if c is None else [round(float(x), 4) for x in c]};'.encode())
+    for e in sorted(tuple(sorted((str(u), str(v)))) for u, v in graph.edges()):
+        h.update(f'{e};'.encode())
+    return os.path.join(KNOT_CACHE_DIR, h.hexdigest() + '.json')
+
+
 def find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None):
+    """Cached wrapper around _find_knotted_loops; results are stored as JSON files in KNOT_CACHE_DIR."""
+    import json
+    path = _knot_cache_path(graph, node_pos_3d, tries)
+    by_str = {str(n): n for n in graph.nodes()}
+    try:
+        with open(path) as f:
+            loops = json.load(f)
+        for lp in loops:
+            lp['nodes'] = [by_str[n] for n in lp['nodes']]
+        return loops
+    except (OSError, ValueError, KeyError):
+        pass
+    loops = _find_knotted_loops(graph, node_pos_3d, tries, workers)
+    try:
+        os.makedirs(KNOT_CACHE_DIR, exist_ok=True)
+        tmp = f'{path}.{os.getpid()}.tmp'
+        with open(tmp, 'w') as f:
+            json.dump([{**lp, 'nodes': [str(n) for n in lp['nodes']]} for lp in loops], f)
+        os.replace(tmp, path)
+    except OSError:
+        logging.warning('Could not write knot cache %s', path)
+    return loops
+
+
+def _find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None):
     """Enumerate loops of `graph` with Topoly and return those that HOMFLY classifies as knotted,
     as dicts with the loop's node sequence, knot type and probabilities (most probable first)."""
     from concurrent.futures import ThreadPoolExecutor
@@ -794,20 +869,24 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     # Mutable server-side state so the pdbid/source-switch callback can swap in a
     # new graph without redeclaring every other callback (Dash apps here are single-user).
     state={}
-    def recompute(g):
+    def compute_obstructions(g,pos,method):
         planar,obs=nx.check_planarity(g,counterexample=True)
+        multi_subgraphs=[]
+        if not planar:
+            multi_subgraphs=find_obstructions(g,method)
+            if method=="sage" and multi_subgraphs:
+                obs=multi_subgraphs[0]
+        return dict(planar=planar,obs=obs,
+                    obs_nodes=set(obs.nodes()) if not planar else set(),
+                    obs_edges={frozenset(e) for e in obs.edges()} if not planar else set(),
+                    obs_pos={n:pos[n] for n in obs.nodes()} if not planar else {},
+                    multi_subgraphs=multi_subgraphs,multi_subgraphs_simplified={},homfly_cache={})
+
+    def recompute(g,method="ogdf"):
         pos=nx.spring_layout(g,seed=1)
-        obs_nodes=set(obs.nodes()) if not planar else set()
-        obs_edges={frozenset(e) for e in obs.edges()} if not planar else set()
-        obs_pos={n:pos[n] for n in obs.nodes()} if not planar else {}
-
-        #multi_subgraphs=find_multiple_kuratowski_subgraphs(g) if not planar else []
-        multi_subgraphs = find_multiple_kuratowski_subgraphs_ogdf(g) if not planar else []
-
         node_pos_3d=get_node_positions_3d(g)
-        state.update(G=g,planar=planar,obs=obs,pos=pos,obs_nodes=obs_nodes,obs_edges=obs_edges,
-                     obs_pos=obs_pos,multi_subgraphs=multi_subgraphs,node_pos_3d=node_pos_3d,
-                     multi_subgraphs_simplified={},homfly_cache={},knotted_loops=[])
+        state.update(G=g,pos=pos,node_pos_3d=node_pos_3d,knotted_loops=[],obs_method=method,
+                     **compute_obstructions(g,pos,method))
     recompute(G)
 
     def get_simplified_subgraph(idx,selected_graph,method='kmt'):
@@ -876,6 +955,12 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Button("Load",id="load-btn",n_clicks=0,style=BTN_PRIMARY),
         ],style=ROW)),
         panel("Obstruction",
+        html.Div([
+        html.Label("Finder",style=LABEL),
+        dcc.RadioItems(id="obstruction-method",inline=True,value="ogdf",options=[
+        {"label":"OGDF","value":"ogdf"},{"label":"SageMath","value":"sage"}],labelStyle=OPT),
+        html.Span(id="obstruction-method-error",style={"fontSize":"13px","color":"crimson"}),
+        ],style=ROW),
         dcc.RadioItems(id="mode",inline=True,value="original",options=[
         {"label":"Original","value":"original"},
         {"label":"Highlight obstruction","value":"highlight"},
@@ -972,18 +1057,32 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     Output("subgraph-index","data",allow_duplicate=True),Output("graph-version","data"),
     Input("load-btn","n_clicks"),Input("pdbid-input","value"),Input("merge-residues","value"),
     State("pdbid-input","value"),State("source-type","value"),State("topoly-reduce","value"),State("topoly-numbering","value"),
-    State("graph-version","data"),
+    State("graph-version","data"),State("obstruction-method","value"),
     prevent_initial_call=True)
-    def load_new_graph(n_clicks,pdbid_input,merge,pdbid_value,source_type,reduce_value,numbering,version):
+    def load_new_graph(n_clicks,pdbid_input,merge,pdbid_value,source_type,reduce_value,numbering,version,obs_method):
         if not pdbid_value:
             raise PreventUpdate
         g,tit=load_graph_by_id(pdbid_value,source_type=="topoly",reduce_value,numbering,bool(merge))
         print(f'nodes: {sorted(g.nodes())}')
         print(f'edges: {sorted(g.edges())}')
         print('--------------------------------------------')
-        recompute(g)
+        recompute(g,obs_method or "ogdf")
         options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(g)]
         return make_title(f"{pdbid_value}-{tit}",g),options,"type" if "type" in edge_attr_keys(g) else "none","original",0,(version or 0)+1
+
+    @app.callback(Output("graph-version","data",allow_duplicate=True),Output("subgraph-index","data",allow_duplicate=True),
+    Output("obstruction-method-error","children"),Output("obstruction-method","value"),
+    Input("obstruction-method","value"),State("graph-version","data"),prevent_initial_call=True)
+    def switch_obstruction_method(method,version):
+        method=method or "ogdf"
+        if method==state.get('obs_method'):
+            raise PreventUpdate
+        try:
+            res=compute_obstructions(state['G'],state['pos'],method)
+        except Exception as e:
+            return no_update,no_update,f"{method} failed: {e}",state.get('obs_method','ogdf')
+        state.update(res,obs_method=method)
+        return (version or 0)+1,0,"",no_update
 
     @app.callback(Output("subgraph-index","data"),
     Input("prev-btn","n_clicks"),Input("next-btn","n_clicks"),
@@ -1076,7 +1175,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         rainbow_rules=[{"selector":f'edge[source = "{u}"][target = "{v}"]',"style":{"line-color":c}}
                        for (u,v),c in ((tuple(e),c) for e,c in rainbow_backbone_map(g).items())] if rainbow else []
         rainbow_rules+=[{"selector":f'edge[source = "{v}"][target = "{u}"]',"style":r["style"]} for r in rainbow_rules for u,v in [(r["selector"].split('"')[3],r["selector"].split('"')[1])]]
-        stylesheet=BASE_STYLE+[{"selector":"node","style":{"font-size":f"{font_size or 18}px"}}]+edge_color_stylesheet(g,attr)+rainbow_rules+OBSTRUCTION_STYLE
+        stylesheet=BASE_STYLE+[{"selector":"node","style":{"font-size":f"{font_size or 18}px"}}]+edge_color_stylesheet(g,attr)+rainbow_rules+OBSTRUCTION_STYLE+KNOT_STYLE
         return stylesheet,edge_color_legend(g,attr)
 
     @app.callback(Output("graph","elements"),
@@ -1090,8 +1189,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             if sel is None:
                 return build_elements(g,state['pos'])
             if "on" in (selected_obstruction_only or []):
-                return build_elements(g.edge_subgraph(sel[1]),state['pos'],sel[0],sel[1],True)
-            return build_elements(g,state['pos'],sel[0],sel[1],True)
+                return build_elements(g.edge_subgraph(sel[1]),state['pos'],sel[0],sel[1],True,"knotted")
+            return build_elements(g,state['pos'],sel[0],sel[1],True,"knotted")
         if mode=="original":
             return build_elements(g,state['pos'])
         if mode=="highlight":
@@ -1152,8 +1251,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             if sel is None:
                 return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid,thickness=thickness,font_size=font_size)
             if "on" in (selected_obstruction_only or []):
-                return build_3d_figure(g.edge_subgraph(sel[1]),node_pos_3d,sel[0],sel[1],True,edge_colors,show_grid,thickness,font_size)
-            return build_3d_figure(g,node_pos_3d,sel[0],sel[1],True,edge_colors,show_grid,thickness,font_size)
+                return build_3d_figure(g.edge_subgraph(sel[1]),node_pos_3d,sel[0],sel[1],True,edge_colors,show_grid,thickness,font_size,KNOT_COLOR)
+            return build_3d_figure(g,node_pos_3d,sel[0],sel[1],True,edge_colors,show_grid,thickness,font_size,KNOT_COLOR)
         if mode=="highlight":
             return build_3d_figure(g,node_pos_3d,state['obs_nodes'],state['obs_edges'],True,edge_colors,show_grid,thickness,font_size)
         if mode=="multi":
