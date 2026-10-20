@@ -5,6 +5,7 @@ import multiprocessing as mp
 import os
 import re
 import threading
+import time
 import random
 from urllib.parse import quote
 import numpy as np
@@ -534,8 +535,102 @@ def kuratowski_subgraph_type(subgraph):
     return "unknown Kuratowski type"
 
 
+def _find_k5_minor(graph, deadline, seen):
+    """Search `graph` for a K_5 minor by exhaustive edge contraction (after removing degree <=1 vertices and
+    suppressing degree-2 ones, which preserve K_5 minors). Every reduced vertex keeps the original tree edges
+    of its branch set and every reduced edge the original edges of the path realizing it, so a hit can be
+    mapped back. Returns the list of original edges of the minor model, or None."""
+    adj = {u: {v: [(u, v)] for v in graph[u]} for u in graph}
+    tree = {u: [] for u in graph}
+
+    def rec(adj, tree):
+        if time.monotonic() > deadline:
+            raise TimeoutError
+        adj = {u: dict(nb) for u, nb in adj.items()}
+        tree = dict(tree)
+        changed = True
+        while changed:
+            changed = False
+            for n in list(adj):
+                nb = adj[n]
+                if len(nb) <= 1:
+                    for m in nb:
+                        del adj[m][n]
+                    del adj[n]
+                    changed = True
+                elif len(nb) == 2:
+                    (a, la), (b, lb) = nb.items()
+                    del adj[a][n], adj[b][n], adj[n]
+                    if b not in adj[a]:
+                        adj[a][b] = adj[b][a] = la + lb + tree[n]
+                    changed = True
+        n_v = len(adj)
+        if n_v < 5 or sum(map(len, adj.values())) < 20:
+            return None
+        if n_v == 5:
+            return [e for u in adj for v in adj[u] if u < v for e in adj[u][v]] + [e for t in tree.values() for e in t] \
+                if all(len(nb) == 4 for nb in adj.values()) else None
+        key = frozenset(frozenset((u, v)) for u in adj for v in adj[u])
+        if key in seen:
+            return None
+        seen.add(key)
+        for u in list(adj):
+            for v in list(adj[u]):
+                if not (u < v):
+                    continue
+                h = {x: dict(nb) for x, nb in adj.items()}
+                t = dict(tree)
+                t[u] = t[u] + t[v] + h[u][v]
+                del t[v]
+                for w, lab in h[v].items():
+                    del h[w][v]
+                    if w != u and w not in h[u]:
+                        h[u][w] = h[w][u] = lab
+                del h[v]
+                res = rec(h, t)
+                if res:
+                    return res
+        return None
+
+    return rec(adj, tree)
+
+
+def find_k5_minors(graph, max_results=20, time_limit=60):
+    """Return up to `max_results` subgraphs, each a K_5 minor model (5 connected branch sets plus the 10 edges
+    joining them). After each hit one edge of the model is deleted so the next search finds a different one."""
+    work = nx.Graph(graph)
+    deadline = time.monotonic() + time_limit
+    negative = set()
+    results = []
+    try:
+        while len(results) < max_results:
+            hit = None
+            for comp in nx.biconnected_components(work):
+                if len(comp) < 5:
+                    continue
+                sub = work.subgraph(comp)
+                key = frozenset(frozenset(e) for e in sub.edges())
+                if key in negative:
+                    continue
+                hit = _find_k5_minor(sub, deadline, set())
+                if hit:
+                    break
+                negative.add(key)
+            if not hit:
+                break
+            model = nx.Graph(hit)
+            model.graph['kind'] = 'K_5 minor'
+            results.append(model)
+            work.remove_edge(*hit[0])
+    except TimeoutError:
+        log.warning('K_5 minor search stopped after %ss; %d found', time_limit, len(results))
+    return results
+
+
 def find_obstructions(graph, method="ogdf"):
-    """Return the Kuratowski subgraphs of `graph` found by `method` ('ogdf' or 'sage')."""
+    """Return the obstruction subgraphs of `graph` found by `method` ('ogdf', 'sage' or 'k5')."""
+    if method == "k5":
+        return find_k5_minors(graph)
     if method == "sage":
         return find_multiple_kuratowski_subgraphs_sage(graph)
     return find_multiple_kuratowski_subgraphs_ogdf(graph)
@@ -1062,7 +1157,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         multi_subgraphs=[]
         if not planar:
             multi_subgraphs=find_obstructions(g,method)
-            if method=="sage" and multi_subgraphs:
+            if method in ("sage","k5") and multi_subgraphs:
                 obs=multi_subgraphs[0]
         return dict(planar=planar,obs=obs,
                     obs_nodes=set(obs.nodes()) if not planar else set(),
@@ -1090,7 +1185,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     def make_title(t,g):
         return f"{t} - Planar: {state['planar']}, Nodes: {g.number_of_nodes()}, Edges: {g.number_of_edges()}"
 
-    GRAPH_BOX_STYLE={"width":"100%","height":"calc(100vh - 190px)","minHeight":"500px"}
+    GRAPH_BOX_STYLE={"width":"100%","height":"calc(100vh - 290px)","minHeight":"500px"}
     CONTROL_GROUP={"display":"flex","alignItems":"center","gap":"6px"}
 
     def container_style(hidden,grid):
@@ -1147,7 +1242,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Div([
         html.Label("Finder",style=LABEL),
         dcc.RadioItems(id="obstruction-method",inline=True,value="ogdf",options=[
-        {"label":"OGDF","value":"ogdf"},{"label":"SageMath","value":"sage"}],labelStyle=OPT),
+        {"label":"OGDF","value":"ogdf"},{"label":"SageMath","value":"sage"},{"label":"K5 minor","value":"k5"}],labelStyle=OPT),
         html.Span(id="obstruction-method-error",style={"fontSize":"13px","color":"crimson"}),
         ],style=ROW),
         dcc.RadioItems(id="mode",inline=True,value="original",options=[
@@ -1289,12 +1384,66 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if not loops:
             return "No knotted loops found." if job else "Click 'Find knotted loops'."
         k=loops[idx%len(loops)]
-        return (f"{len(loops)} knotted loop(s) - showing {idx%len(loops)+1}: {k['knot']} "
-                f"(P(knot)={k['prob']:.2f}, P(unknot)={k['unknot_prob']:.2f}, {len(k['nodes'])} nodes)")
+        text=(f"{len(loops)} knotted loop(s) - showing {idx%len(loops)+1}: {k['knot']} "
+              f"(P(knot)={k['prob']:.2f}, P(unknot)={k['unknot_prob']:.2f}, {len(k['nodes'])} nodes)")
+        return [text,html.Br(),html.Span(obstruction_summary(k),style={"fontSize":"12px","color":"#1565c0"})]
+
+
+    OBSTRUCTION_FINDERS=(("ogdf","OGDF"),("sage","SageMath"),("k5","K5 minor"))
+
+    def all_obstructions(graph):
+        """Obstructions of `graph` from every finder (or the error text), cached per graph object."""
+        cache=state.setdefault('all_obstructions',{})
+        if cache.get('graph') is not graph:
+            cache.clear()
+            cache['graph']=graph
+            planar=nx.check_planarity(graph)[0]
+            for key,_ in OBSTRUCTION_FINDERS:
+                try:
+                    cache[key]=[] if planar and key!="k5" else find_obstructions(graph,key)
+                except Exception as e:
+                    cache[key]=str(e)
+        return cache
+
+    def annotate_knotted_loops(graph,loops):
+        """For each loop record, per finder, which obstruction subgraphs equal it or contain all its edges."""
+        obs=all_obstructions(graph)
+        for lp in loops:
+            nodes=lp['nodes']
+            edges={frozenset((nodes[i],nodes[(i+1)%len(nodes)])) for i in range(len(nodes))}
+            res={}
+            for key,_ in OBSTRUCTION_FINDERS:
+                subs=obs[key]
+                if isinstance(subs,str):
+                    res[key]={"error":subs}
+                    continue
+                sub_edges=[{frozenset(e) for e in sg.edges()} for sg in subs]
+                res[key]={"same":[i+1 for i,se in enumerate(sub_edges) if se==edges],
+                          "inside":[i+1 for i,se in enumerate(sub_edges) if edges<se],"total":len(subs)}
+            lp['obstructions']=res
+        return loops
+
+    def obstruction_summary(lp):
+        res=lp.get('obstructions')
+        if not res:
+            return ""
+        parts=[]
+        for key,label in OBSTRUCTION_FINDERS:
+            r=res[key]
+            if "error" in r:
+                parts.append(f"{label}: n/a ({r['error'][:40]})")
+            elif r["same"]:
+                parts.append(f"{label}: identical to #{', #'.join(map(str,r['same']))}")
+            elif r["inside"]:
+                parts.append(f"{label}: contained in #{', #'.join(map(str,r['inside']))} of {r['total']}")
+            else:
+                parts.append(f"{label}: not related ({r['total']} found)")
+        return "; ".join(parts)
 
     def run_knot_job(job,graph,node_pos_3d,params):
         try:
-            job['result']=find_knotted_loops(graph,node_pos_3d,tries=500,params=params)
+            loops=find_knotted_loops(graph,node_pos_3d,tries=500,params=params)
+            job['result']=annotate_knotted_loops(graph,loops)
         except Exception as e:
             job['error']=str(e)
         job['running']=False
@@ -1352,10 +1501,11 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         subgraphs=state['multi_subgraphs']
         n=len(subgraphs)
         if n==0:
-            return "No additional Kuratowski subgraphs found."
+            return "No K_5 minors found." if state.get('obs_method')=="k5" else "No additional Kuratowski subgraphs found."
         idx=(idx or 0)%n
-        kind=kuratowski_subgraph_type(subgraphs[idx])
-        return f"Found {n} Kuratowski subgraph(s) - showing {idx+1} of {n}: {kind}"
+        kind=subgraphs[idx].graph.get('kind') or kuratowski_subgraph_type(subgraphs[idx])
+        what="K_5 minor model(s)" if state.get('obs_method')=="k5" else "Kuratowski subgraph(s)"
+        return f"Found {n} {what} - showing {idx+1} of {n}: {kind}"
 
     @app.callback(Output("graph","stylesheet"),Output("edge-color-legend","children"),
     Input("edge-color-attr","value"),Input("graph-version","data"),Input("rainbow-backbone","value"),Input("node-font-size","value"),
