@@ -46,17 +46,19 @@ def create_graph(seed=42,n_cliques=5,n_bicliques=6,n_random_edges=10):
         u,v=random.sample(nodes,2); G.add_edge(u,v)
     return G
 
-def build_elements(graph,pos,obs_nodes=set(),obs_edges=set(),highlight=False,cls="obstruction"):
+def build_elements(graph,pos,obs_nodes=set(),obs_edges=set(),highlight=False,cls="obstruction",knot_nodes=(),knot_edges=()):
     els=[]
     for n in graph.nodes():
         e={"data":{"id":str(n),"label":str(n)},"position":{"x":pos[n][0]*800,"y":pos[n][1]*800}}
         if highlight and n in obs_nodes: e["classes"]=cls
+        if n in knot_nodes: e["classes"]="knotted"
         els.append(e)
     for u,v,data in graph.edges(data=True):
         edata={"source":str(u),"target":str(v)}
         edata.update(data)
         e={"data":edata}
         if highlight and frozenset((u,v)) in obs_edges: e["classes"]=cls
+        if frozenset((u,v)) in knot_edges: e["classes"]="knotted"
         els.append(e)
     return els
 
@@ -333,7 +335,7 @@ def tube_mesh(edges,node_pos,color,radius,sides=8):
         flatshading=False,lighting=dict(ambient=0.45,diffuse=0.8,specular=0.3,roughness=0.5),
         hoverinfo="none",showlegend=False)
 
-def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=False,edge_colors=None,show_grid=False,thickness=1.0,font_size=18,hl_color="crimson"):
+def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=False,edge_colors=None,show_grid=False,thickness=1.0,font_size=18,hl_color="crimson",knot_nodes=(),knot_edges=()):
     edge_colors=edge_colors or {}
     by_color={}
     for u,v in graph.edges():
@@ -347,13 +349,17 @@ def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=Fal
     for color,edges in by_color.items():
         traces.append(tube_mesh(edges,node_pos,color,radius))
     if highlight and obs_edges:
-        obs=[(u,v) for u,v in graph.edges() if frozenset((u,v)) in obs_edges]
-        traces.append(tube_mesh(obs,node_pos,hl_color,radius*2))
+        obs=[(u,v) for u,v in graph.edges() if frozenset((u,v)) in obs_edges and frozenset((u,v)) not in knot_edges]
+        if obs:
+            traces.append(tube_mesh(obs,node_pos,hl_color,radius*2))
+    knot=[(u,v) for u,v in graph.edges() if frozenset((u,v)) in knot_edges]
+    if knot:
+        traces.append(tube_mesh(knot,node_pos,KNOT_COLOR,radius*3))
     node_x,node_y,node_z,node_color,node_text=[],[],[],[],[]
     for n in graph.nodes():
         x,y,z=node_pos[n]
         node_x.append(x); node_y.append(y); node_z.append(z)
-        node_color.append(hl_color if highlight and n in obs_nodes else "#1976d2")
+        node_color.append(KNOT_COLOR if n in knot_nodes else hl_color if highlight and n in obs_nodes else "#1976d2")
         node_text.append(str(n))
     traces.append(go.Scatter3d(x=node_x,y=node_y,z=node_z,mode="markers+text",
         text=node_text,textposition="top center",textfont=dict(size=font_size,color="#111"),
@@ -632,8 +638,36 @@ def find_k5_minors(graph, max_results=20, time_limit=60):
     return results
 
 
+def find_k33_subgraphs(graph):
+    """All K_3,3 subdivisions found by OGDF and SageMath, merged and deduplicated by edge set.
+    Each subgraph records in graph['sources'] which finder(s) reported it; a finder that fails is skipped."""
+    merged = {}
+    errors = []
+    for key, label, finder in (("ogdf", "OGDF", find_multiple_kuratowski_subgraphs_ogdf),
+                               ("sage", "SageMath", find_multiple_kuratowski_subgraphs_sage)):
+        try:
+            found = finder(graph)
+        except Exception as e:
+            errors.append(f"{label}: {e}")
+            continue
+        for sg in found:
+            if not kuratowski_subgraph_type(sg).startswith("K_3,3"):
+                continue
+            edges = frozenset(frozenset(e) for e in sg.edges())
+            if edges not in merged:
+                sg.graph['kind'] = 'K_3,3'
+                sg.graph['sources'] = []
+                merged[edges] = sg
+            merged[edges].graph['sources'].append(label)
+    if len(errors) == 2:
+        raise RuntimeError("; ".join(errors))
+    return list(merged.values())
+
+
 def find_obstructions(graph, method="ogdf"):
-    """Return the obstruction subgraphs of `graph` found by `method` ('ogdf', 'sage' or 'k5')."""
+    """Return the obstruction subgraphs of `graph` found by `method` ('ogdf', 'sage', 'k33' or 'k5')."""
+    if method == "k33":
+        return find_k33_subgraphs(graph)
     if method == "k5":
         return find_k5_minors(graph)
     if method == "sage":
@@ -865,7 +899,7 @@ KNOT_CACHE_DIR = os.environ.get('KNOT_CACHE_DIR', os.path.join(os.path.dirname(o
 def _knot_cache_path(graph, node_pos_3d, tries, kind=''):
     """Cache file path keyed by a hash of the graph's edges, node coordinates and HOMFLY tries."""
     import hashlib
-    h = hashlib.sha256(f'v1|{tries}|{kind}'.encode())
+    h = hashlib.sha256(f'v2-chiral|{tries}|{kind}'.encode())
     for n in sorted(graph.nodes(), key=str):
         c = graph.nodes[n].get('coords')
         if c is None and node_pos_3d is not None:
@@ -1162,7 +1196,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         multi_subgraphs=[]
         if not planar:
             multi_subgraphs=find_obstructions(g,method)
-            if method in ("sage","k5") and multi_subgraphs:
+            if method in ("sage","k5","k33") and multi_subgraphs:
                 obs=multi_subgraphs[0]
         return dict(planar=planar,obs=obs,
                     obs_nodes=set(obs.nodes()) if not planar else set(),
@@ -1173,7 +1207,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     def recompute(g,method="ogdf",params=None):
         node_pos_3d=get_node_positions_3d(g)
         pos={n:(coord[0],coord[1]) for n,coord in node_pos_3d.items()}
-        state.update(G=g,pos=pos,node_pos_3d=node_pos_3d,knotted_loops=[],obs_method=method,graph_params=params or {},
+        state.update(G=g,pos=pos,node_pos_3d=node_pos_3d,knotted_loops=[],within=None,obs_method=method,graph_params=params or {},
                      **compute_obstructions(g,pos,method))
     recompute(G,params=dict(pdbid=pdbid or None,source="topoly" if is_topoly else "simplified",
                             reduce=str(TopolyReduce.INTERNAL),numbering="auth",merge_residues=False))
@@ -1243,7 +1277,39 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         dcc.Checklist(id="merge-residues",options=[{"label":"Merge residue edges","value":"on"}],value=[],labelStyle=OPT),
         html.Button("Load",id="load-btn",n_clicks=0,style=BTN_PRIMARY),
         ],style=ROW)),
-        panel("Obstruction",
+        panel("Find",
+        html.Div([
+        dcc.Loading(type="dot",children=[html.Div([
+            html.Button("K_3,3",id="find-k33-btn",n_clicks=0,style=BTN_PRIMARY),
+            html.Button("K_5 minor",id="find-k5-btn",n_clicks=0,style=BTN_PRIMARY),
+            html.Span(id="find-message",style={"fontSize":"12px","color":"crimson"}),
+        ],style=ROW)],style={"display":"inline-block"}),
+        ],style=ROW),
+        html.Div([
+        html.Button("< Prev",id="prev-btn",n_clicks=0,style=BTN),
+        html.Button("Next >",id="next-btn",n_clicks=0,style=BTN),
+        html.Span(id="subgraph-info",style={"fontSize":"12px","color":"#37474f"}),
+        ],style=ROW),
+        html.Div([
+        dcc.Loading(type="dot",children=[html.Div([
+            html.Button("Knot within",id="within-btn",n_clicks=0,style=BTN_PRIMARY),
+            html.Button("< Prev knot",id="within-prev-btn",n_clicks=0,style=BTN),
+            html.Button("Next knot >",id="within-next-btn",n_clicks=0,style=BTN),
+            html.Span(id="within-info",style={"fontSize":"13px","fontWeight":"600","color":"#e65100"}),
+        ],style=ROW)],style={"display":"inline-block"}),
+        ],style=ROW),
+        html.Div([
+        html.Button("Simplify",id="simplify-btn",n_clicks=0,style=BTN),
+        html.Div([
+            html.Label("Method",style={**LABEL,"minWidth":"auto"}),
+            dcc.Dropdown(id="simplify-method",clearable=False,style={"width":"120px","height":"26px","minHeight":"26px"},
+                         value="kmt",options=TOPOLY_SUBGRAPH_REDUCE_OPTIONS),
+        ],id="simplify-method-container",style={**CONTROL_GROUP,"display":"none"}),
+        ],style=ROW),
+        html.Div("Orange = knotted loop within the shown subgraph (sign = handedness).",
+                 style={"fontSize":"12px","color":"#607d8b"}),
+        html.Button("Advanced \u25b8",id="advanced-btn",n_clicks=0,style={**BTN,"alignSelf":"flex-start"}),
+        html.Div([
         html.Div([
         html.Label("Finder",style=LABEL),
         dcc.RadioItems(id="obstruction-method",inline=True,value="ogdf",options=[
@@ -1256,7 +1322,6 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         {"label":"Obstruction only","value":"obstruction"},
         {"label":"Multiple obstructions","value":"multi"},
         {"label":"Knotted loops","value":"knots"}],labelStyle=OPT),
-        html.Div([
         dcc.Checklist(id="selected-obstruction-only",
                       options=[{"label":"Show selected obstruction only","value":"on"}],
                       value=[],labelStyle=OPT),
@@ -1264,32 +1329,14 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                       options=[{"label":"Simplify subgraph","value":"on"}],
                       value=[],labelStyle=OPT),
         html.Div([
-            html.Label("Method",style={**LABEL,"minWidth":"auto"}),
-            dcc.Dropdown(id="simplify-method",clearable=False,style={"width":"120px","height":"26px","minHeight":"26px"},
-                         value="kmt",options=TOPOLY_SUBGRAPH_REDUCE_OPTIONS),
-        ],id="simplify-method-container",style={**CONTROL_GROUP,"display":"none"}),
-        ],style=ROW),
-        html.Div([
-        html.Button("< Prev",id="prev-btn",n_clicks=0,style=BTN),
-        html.Button("Next >",id="next-btn",n_clicks=0,style=BTN),
-        html.Span(id="subgraph-info",style={"fontSize":"12px","color":"#37474f"}),
-        dcc.Checklist(id="homfly-test",
-                      options=[{"label":"Test knot (HOMFLY 500)","value":"on"}],
-                      value=[],labelStyle=OPT),
         html.Button("Run HOMFLY",id="run-homfly-btn",n_clicks=0,style=BTN),
-        dcc.Loading(id="homfly-loading",type="dot",children=[
-            html.Span(id="homfly-result",style={"fontSize":"13px","fontWeight":"600","color":"#1565c0","marginLeft":"8px"}),
-        ],style={"display":"inline-block","marginLeft":"4px"}),
-        ],style=ROW)),
-        panel("Knotted loops",
-        html.Div([
         html.Button("Find knotted loops",id="find-knots-btn",n_clicks=0,style=BTN_PRIMARY),
         html.Button("< Prev",id="knot-prev-btn",n_clicks=0,style=BTN),
         html.Button("Next >",id="knot-next-btn",n_clicks=0,style=BTN),
+        ],style={**ROW,"flexWrap":"nowrap"}),
+        html.Span(id="homfly-result",style={"fontSize":"13px","fontWeight":"600","color":"#1565c0"}),
         html.Span(id="knot-info",style={"fontSize":"13px","color":"#37474f"}),
-        ],style=ROW),
-        html.Div("Knotted: P(unknot) < 0.5 and P(knot) >= 0.48 (HOMFLY, 500 tries). Loops are searched in the whole loaded graph, not in the shown obstruction subgraph. Select the 'Knotted loops' mode to view.",
-                 style={"fontSize":"12px","color":"#607d8b"})),
+        ],id="advanced-container",style={"display":"none","flexDirection":"column","gap":"3px"})),
         panel("Appearance",
         html.Div([
         html.Label("View",style=LABEL),
@@ -1322,10 +1369,18 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     dcc.Store(id="subgraph-index",data=0),
     dcc.Store(id="knot-index",data=0),
     dcc.Store(id="knot-version",data=0),
+    dcc.Store(id="within-index",data=0),
+    dcc.Store(id="within-version",data=0),
     dcc.Interval(id="knot-poll",interval=2000,disabled=True),
     cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,style=container_style(False,False)),
     dcc.Graph(id="graph-3d",style=container_style(True,False),config={"displayModeBar":False}),
     ],style={"fontFamily":FONT,"padding":"4px 10px"})
+
+    @app.callback(Output("advanced-container","style"),Output("advanced-btn","children"),Input("advanced-btn","n_clicks"))
+    def toggle_advanced(n):
+        show=bool(n and n%2)
+        return ({"display":"flex","flexDirection":"column","gap":"3px"} if show else {"display":"none"},
+                "Advanced \u25be" if show else "Advanced \u25b8")
 
     @app.callback(Output("topoly-reduce-container","style"),Input("source-type","value"))
     def toggle_topoly_reduce(source_type):
@@ -1501,16 +1556,116 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         edges={e for e in edges if len(e)==2 and state['G'].has_edge(*e)}
         return set(nodes),edges
 
-    @app.callback(Output("subgraph-info","children"),Input("subgraph-index","data"))
-    def update_info(idx):
+    FAMILY_LABELS={"k33":"K_3,3","k5":"K_5 minor"}
+
+    @app.callback(Output("subgraph-info","children"),Input("subgraph-index","data"),Input("graph-version","data"))
+    def update_info(idx,_version):
+        method=state.get('obs_method')
+        if method not in FAMILY_LABELS:
+            return "Click K_3,3 or K_5 minor."
         subgraphs=state['multi_subgraphs']
         n=len(subgraphs)
+        name=FAMILY_LABELS[method]
         if n==0:
-            return "No K_5 minors found." if state.get('obs_method')=="k5" else "No additional Kuratowski subgraphs found."
+            return f"No {name} found."
         idx=(idx or 0)%n
-        kind=subgraphs[idx].graph.get('kind') or kuratowski_subgraph_type(subgraphs[idx])
-        what="K_5 minor model(s)" if state.get('obs_method')=="k5" else "Kuratowski subgraph(s)"
-        return f"Found {n} {what} - showing {idx+1} of {n}: {kind}"
+        sources=subgraphs[idx].graph.get('sources')
+        text=f"{name} {idx+1} of {n}"
+        return f"{text} (found by {' and '.join(sources)})" if sources else text
+
+    @app.callback(Output("prev-btn","children"),Output("next-btn","children"),Input("graph-version","data"))
+    def update_nav_labels(_version):
+        name=FAMILY_LABELS.get(state.get('obs_method'))
+        return (f"< Prev {name}",f"Next {name} >") if name else ("< Prev","Next >")
+
+    @app.callback(Output("graph-version","data",allow_duplicate=True),Output("subgraph-index","data",allow_duplicate=True),
+    Output("mode","value",allow_duplicate=True),Output("selected-obstruction-only","value",allow_duplicate=True),
+    Output("find-message","children"),
+    Input("find-k33-btn","n_clicks"),Input("find-k5-btn","n_clicks"),State("graph-version","data"),
+    prevent_initial_call=True)
+    def find_family(_k33,_k5,version):
+        method="k33" if ctx.triggered_id=="find-k33-btn" else "k5"
+        try:
+            res=compute_obstructions(state['G'],state['pos'],method)
+        except Exception as e:
+            return no_update,no_update,no_update,no_update,f"{FAMILY_LABELS[method]} search failed: {e}"
+        state.update(res,obs_method=method,within=None)
+        found=bool(res['multi_subgraphs'])
+        return (version or 0)+1,0,"multi" if found else "original",["on"] if found else [],""
+
+    @app.callback(Output("simplify-subgraph","value"),Input("simplify-btn","n_clicks"),State("simplify-subgraph","value"),
+    prevent_initial_call=True)
+    def toggle_simplify(_n,value):
+        return [] if "on" in (value or []) else ["on"]
+
+    @app.callback(Output("simplify-btn","style"),Input("simplify-subgraph","value"))
+    def simplify_button_style(value):
+        return BTN_PRIMARY if "on" in (value or []) else BTN
+
+    def within_key(idx,simplified,method):
+        return (state.get('obs_method'),id(state['multi_subgraphs']),idx,simplified,method)
+
+    def displayed_subgraph(idx,simplified,method):
+        sub=state['multi_subgraphs'][idx]
+        selected=state['G'].edge_subgraph(sub.edges())
+        return get_simplified_subgraph(idx,selected,method=method) if simplified else selected
+
+    def within_selection(idx,simplified,method,widx):
+        """(nodes, edges) of the chosen knotted loop within the shown subgraph, or None if not computed for it."""
+        w=state.get('within')
+        if not w or not w['loops'] or not state['multi_subgraphs'] or w['key']!=within_key(idx,simplified,method):
+            return None
+        nodes=w['loops'][widx%len(w['loops'])]['nodes']
+        edges={frozenset((nodes[i],nodes[(i+1)%len(nodes)])) for i in range(len(nodes))}
+        return set(nodes),edges
+
+    def within_status(idx,simplified,method,widx):
+        name=FAMILY_LABELS.get(state.get('obs_method'))
+        if not name or not state['multi_subgraphs']:
+            return ""
+        w=state.get('within')
+        if not w or w['key']!=within_key(idx,simplified,method):
+            return f"Click 'Knot within' to look for knots in this {name}."
+        if 'error' in w:
+            return f"Knot search failed: {w['error']}"
+        loops=w['loops']
+        if not loops:
+            return f"No knot found within this {name}."
+        k=loops[widx%len(loops)]
+        knot=k['knot']
+        if knot[0] not in "+-":
+            knot+=" (achiral or handedness undetermined)"
+        return f"Knot {widx%len(loops)+1} of {len(loops)}: {knot}, P={k['prob']:.2f}"
+
+    @app.callback(Output("within-index","data"),Output("within-version","data"),Output("within-info","children"),
+    Input("within-btn","n_clicks"),Input("within-prev-btn","n_clicks"),Input("within-next-btn","n_clicks"),
+    Input("subgraph-index","data"),Input("graph-version","data"),Input("simplify-subgraph","value"),Input("simplify-method","value"),
+    State("within-index","data"),State("within-version","data"),prevent_initial_call=True)
+    def within_controls(_b,_p,_n,sub_idx,_gv,simplify_val,method,widx,version):
+        simplified="on" in (simplify_val or [])
+        method=method or "kmt"
+        widx=widx or 0
+        trigger=ctx.triggered_id
+        n_sub=len(state['multi_subgraphs'])
+        sub_idx=(sub_idx or 0)%n_sub if n_sub else 0
+        key=within_key(sub_idx,simplified,method)
+        if trigger=="within-btn":
+            if not n_sub or state.get('obs_method') not in FAMILY_LABELS:
+                return 0,no_update,"Find a K_3,3 or K_5 minor first."
+            target=displayed_subgraph(sub_idx,simplified,method)
+            try:
+                loops=find_knotted_loops(target,state.get('node_pos_3d'),tries=500,
+                                         params=dict(state.get('graph_params',{}),within=state['obs_method'],
+                                                     subgraph_index=sub_idx,simplified=simplified))
+                state['within']=dict(key=key,loops=loops)
+            except Exception as e:
+                state['within']=dict(key=key,loops=[],error=str(e))
+            return 0,(version or 0)+1,within_status(sub_idx,simplified,method,0)
+        w=state.get('within')
+        if trigger in ("within-prev-btn","within-next-btn") and w and w['key']==key and w['loops']:
+            widx=(widx+(1 if trigger=="within-next-btn" else -1))%len(w['loops'])
+            return widx,(version or 0)+1,within_status(sub_idx,simplified,method,widx)
+        return widx,no_update,within_status(sub_idx,simplified,method,widx)
 
     @app.callback(Output("graph","stylesheet"),Output("edge-color-legend","children"),
     Input("edge-color-attr","value"),Input("graph-version","data"),Input("rainbow-backbone","value"),Input("node-font-size","value"),
@@ -1537,8 +1692,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     Input("selected-obstruction-only","value"),Input("simplify-subgraph","value"),
     Input("simplify-method","value"),Input("knot-index","data"),Input("knot-version","data"),
     Input("view-dim","value"),Input("edge-thickness","value"),
-    Input("rainbow-backbone","value"),Input("edge-color-attr","value"))
-    def update(mode,idx,_version,selected_obstruction_only,simplify_subgraph,simplify_method,knot_idx,_kv,view_dim,_thickness_index,rainbow,color_attr):
+    Input("rainbow-backbone","value"),Input("edge-color-attr","value"),
+    Input("within-index","data"),Input("within-version","data"))
+    def update(mode,idx,_version,selected_obstruction_only,simplify_subgraph,simplify_method,knot_idx,_kv,view_dim,_thickness_index,rainbow,color_attr,widx,_wv):
         g=state['G']
         def finalize(elements):
             if view_dim != "2d":
@@ -1568,10 +1724,14 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             sub_edges={frozenset(e) for e in sub.edges()}
             if "on" in (selected_obstruction_only or []):
                 selected_graph=g.edge_subgraph(sub.edges())
-                if "on" in (simplify_subgraph or []):
+                simplified="on" in (simplify_subgraph or [])
+                knot=within_selection(idx,simplified,simplify_method or "kmt",widx or 0) or (set(),set())
+                if simplified:
                     simp_g=get_simplified_subgraph(idx,selected_graph,method=simplify_method or "kmt")
-                    return finalize(build_elements(simp_g,state['pos'],set(simp_g.nodes()),{frozenset(e) for e in simp_g.edges()},True))
-                return finalize(build_elements(selected_graph,state['pos'],sub_nodes,sub_edges,True))
+                    return finalize(build_elements(simp_g,state['pos'],set(simp_g.nodes()),{frozenset(e) for e in simp_g.edges()},True,
+                                                   knot_nodes=knot[0],knot_edges=knot[1]))
+                return finalize(build_elements(selected_graph,state['pos'],sub_nodes,sub_edges,True,
+                                               knot_nodes=knot[0],knot_edges=knot[1]))
             return finalize(build_elements(g,state['pos'],sub_nodes,sub_edges,True))
         return finalize(build_elements(state['obs'],state['obs_pos']))
 
@@ -1599,8 +1759,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     Input("graph-version","data"),Input("show-grid","value"),
     Input("rainbow-backbone","value"),Input("edge-thickness","value"),Input("node-font-size","value"),
     Input("selected-obstruction-only","value"),Input("simplify-subgraph","value"),
-    Input("simplify-method","value"),Input("knot-index","data"),Input("knot-version","data"))
-    def update_3d(mode,idx,attr,_version,grid_value,rainbow,thickness,font_size,selected_obstruction_only,simplify_subgraph,simplify_method,knot_idx,_kv):
+    Input("simplify-method","value"),Input("knot-index","data"),Input("knot-version","data"),
+    Input("within-index","data"),Input("within-version","data"))
+    def update_3d(mode,idx,attr,_version,grid_value,rainbow,thickness,font_size,selected_obstruction_only,simplify_subgraph,simplify_method,knot_idx,_kv,widx,_wv):
         font_size=font_size or 18
         g=state['G']
         node_pos_3d=state['node_pos_3d']
@@ -1628,13 +1789,15 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             sub_edges={frozenset(e) for e in sub.edges()}
             if "on" in (selected_obstruction_only or []):
                 selected_graph=g.edge_subgraph(sub.edges())
-                if "on" in (simplify_subgraph or []):
+                simplified="on" in (simplify_subgraph or [])
+                knot=within_selection(idx,simplified,simplify_method or "kmt",widx or 0) or (set(),set())
+                if simplified:
                     simp_g=get_simplified_subgraph(idx,selected_graph,method=simplify_method or "kmt")
                     simp_edge_colors={**edge_color_map(simp_g,attr),**(rainbow_backbone_map(simp_g) if rainbow else {})}
                     return build_3d_figure(simp_g,node_pos_3d,set(simp_g.nodes()),{frozenset(e) for e in simp_g.edges()},True,
-                                           simp_edge_colors,show_grid,thickness,font_size)
+                                           simp_edge_colors,show_grid,thickness,font_size,knot_nodes=knot[0],knot_edges=knot[1])
                 return build_3d_figure(selected_graph,node_pos_3d,sub_nodes,sub_edges,True,
-                                       edge_colors,show_grid,thickness,font_size)
+                                       edge_colors,show_grid,thickness,font_size,knot_nodes=knot[0],knot_edges=knot[1])
             return build_3d_figure(g,node_pos_3d,sub_nodes,sub_edges,True,edge_colors,show_grid,thickness,font_size)
         obs=state['obs']
         obs_pos_3d={n:node_pos_3d[n] for n in obs.nodes()} if not state['planar'] else {}
@@ -1643,29 +1806,19 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     @app.callback(
         Output("homfly-result","children"),
         Input("run-homfly-btn","n_clicks"),
-        Input("homfly-test","value"),
         Input("subgraph-index","data"),
         Input("graph-version","data"),
         Input("mode","value"),
         Input("selected-obstruction-only","value"),
         Input("simplify-subgraph","value"),
         Input("simplify-method","value"))
-    def update_homfly_knot(run_clicks,homfly_test_val,idx,_version,mode,
+    def update_homfly_knot(run_clicks,idx,_version,mode,
                            selected_obstruction_only,simplify_subgraph,simplify_method):
         try:
             triggered=ctx.triggered_id
         except Exception:
             triggered=None
-        is_homfly_checked="on" in (homfly_test_val or [])
-        was_run_clicked=bool(run_clicks and run_clicks>0)
-
-        if triggered=="graph-version" and not is_homfly_checked:
-            return ""
-
-        if not is_homfly_checked and not was_run_clicked:
-            return ""
-
-        if not is_homfly_checked and triggered not in ("run-homfly-btn",None):
+        if triggered!="run-homfly-btn":
             return ""
 
         if state.get('planar'):

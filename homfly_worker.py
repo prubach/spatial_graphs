@@ -12,7 +12,7 @@ def main():
     os.dup2(sys.stderr.fileno(), 1)
     import topoly as tp
     try:
-        res = tp.homfly(chain, tries=tries, run_parallel=False)
+        res = tp.homfly(chain, tries=tries, run_parallel=False, chiral=True)
     except Exception:
         res = None
     pickle.dump(res, out)

@@ -15,14 +15,20 @@ The app is served at `/spatialgraph/` by default. Override with the `CONTEXT_PAT
 The app is then available at `http://host:8014/spatialgraph/`.
 
 
-## Knotted loops vs "Run HOMFLY" button/"Test knot (HOMFLY 500)" checkbox
+## Finding K_3,3 and K_5 minors
+
+After choosing a protein, the "Find" panel works as follows:
+- "K_3,3" finds all K_3,3 subdivisions (OGDF and SageMath results are merged and deduplicated; the finder(s) that reported each one are shown). "K_5 minor" finds K_5 minors.
+- "Next/Prev" steps through the results.
+- "Knot within" looks for knotted loops inside the shown K_3,3 / K_5 minor and highlights one in orange with its knot type and handedness (e.g. +3_1 vs -3_1). "Next knot" / "Prev knot" step through them.
+- "Simplify" shows the simplified subgraph (method selectable); "Knot within" then works on the simplified subgraph.
+
+## Knotted loops vs "Run HOMFLY" button
 
 Knotted loops are detected on the whole loaded graph, that may be the simplified version selected in the "Simplification" dropdown. The result appears in the "Knotted loops" section of the right panel.
 Knotted loops are detected automatically when the graph is loaded or changed, and the result appears in the "Knotted loops" section of the right panel.
 
-"Run HOMFLY" vs "Test knot (HOMFLY 500)": both run the same 500-try HOMFLY test on the currently shown obstruction subgraph, and the result appears in the same place.
-- "Test knot" checkbox: runs automatically whenever the shown subgraph changes. That covers switching mode, moving to the previous or next subgraph, changing simplification, and loading a graph.
-- "Run HOMFLY" button: runs it once on demand when the checkbox is off. The result then clears on the next change.
+"Run HOMFLY" (in the "Advanced" section) runs a 500-try HOMFLY test once, on demand, on the currently shown obstruction subgraph. The result clears on the next change.
 
 ## Install Sage using MiniConda3
 
@@ -46,3 +52,4 @@ python dash_graphs.py
 
 
 For identified knotted loops check if those graphs are the same as one of the Kuratowski subgraphs using both OGDF and SageMath or a K_5 minor and report it in the "Knotted loops" panel.
+The "Advanced" button in the "Find" panel (hidden by default) reveals the original controls: the OGDF / SageMath / K5 minor finder, the display modes (including "Knotted loops"), "Run HOMFLY", and the whole-graph "Find knotted loops" search.
