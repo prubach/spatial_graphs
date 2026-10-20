@@ -60,8 +60,10 @@ def build_elements(graph,pos,obs_nodes=set(),obs_edges=set(),highlight=False,cls
     return els
 
 
-def _crossing_overlay_elements(elements, node_pos_3d, edge_thickness=1.0):
-    """Add visual overpasses for crossings in a 2D drawing, ranked by interpolated z."""
+def _crossing_overlay_elements(elements, node_pos_3d, edge_thickness=1.0, edge_colors=None):
+    """Add visual overpasses for crossings in a 2D drawing, ranked by interpolated z.
+    The over strand is drawn in its edge's color from `edge_colors` (frozenset of str ids -> hex)."""
+    edge_colors = edge_colors or {}
     positions = {}
     for element in elements:
         data = element.get("data", {})
@@ -107,6 +109,7 @@ def _crossing_overlay_elements(elements, node_pos_3d, edge_thickness=1.0):
             if abs(z1 - z2) < 1e-9:
                 continue
             over_start, over_end = (p, q) if z1 > z2 else (c, d)
+            over_color = edge_colors.get(frozenset((u, v) if z1 > z2 else (a, b)), '#222')
             under_start, under_end = (c, d) if z1 > z2 else (p, q)
 
             def direction(start, end):
@@ -123,7 +126,7 @@ def _crossing_overlay_elements(elements, node_pos_3d, edge_thickness=1.0):
                 'stroke="white" stroke-width="9" stroke-linecap="round"/>'
                 f'<path d="M {12 - 9 * over_dx:.2f} {12 - 9 * over_dy:.2f} '
                 f'L {12 + 9 * over_dx:.2f} {12 + 9 * over_dy:.2f}" '
-                'stroke="#222" stroke-width="5" stroke-linecap="round"/>'
+                f'stroke="{over_color}" stroke-width="5" stroke-linecap="round"/>'
                 '</svg>'
             )
             x = p["x"] + t * r[0]
@@ -674,29 +677,19 @@ def _homfly_call(conn, chain, tries):
 
 
 def _isolated_homfly(chain, tries):
-    """Run tp.homfly in its own process so a liblmpoly abort() only loses this chain.
-    Long chains are first reduced (KMT) to keep the crossing code within liblmpoly's buffers."""
-    # try:
-    #     if len(chain) > 100:
-    #         chain = tp.reduce_structure(chain, reduce_method=1)
-    # except Exception:
-    #     pass
-    ctx = mp.get_context('fork')
-    recv, send = ctx.Pipe(duplex=False)
-    proc = ctx.Process(target=_homfly_call, args=(send, chain, tries), daemon=True)
+    """Run tp.homfly in a fresh interpreter so a liblmpoly abort() only loses this chain.
+    A subprocess (not fork) is used because forking this multithreaded process from several
+    threads yields children with a corrupted heap ("malloc(): corrupted top size") or deadlocks."""
+    import pickle
+    import subprocess
+    import sys
+    worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'homfly_worker.py')
     try:
-        proc.start()
-        send.close()
-        if recv.poll(HOMFLY_TIMEOUT):
-            return recv.recv()
-        return None
+        proc = subprocess.run([sys.executable, worker], input=pickle.dumps((chain, tries)),
+                              stdout=subprocess.PIPE, timeout=HOMFLY_TIMEOUT)
+        return pickle.loads(proc.stdout) if proc.returncode == 0 and proc.stdout else None
     except Exception:
         return None
-    finally:
-        if proc.is_alive():
-            proc.kill()
-        proc.join()
-        recv.close()
 
 
 def _evaluate_subgraph_knot_worker(arcs_4d, node_coords_list, tries=500):
@@ -1394,21 +1387,24 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     Input("mode","value"),Input("subgraph-index","data"),Input("graph-version","data"),
     Input("selected-obstruction-only","value"),Input("simplify-subgraph","value"),
     Input("simplify-method","value"),Input("knot-index","data"),Input("knot-version","data"),
-    Input("view-dim","value"),Input("edge-thickness","value"))
-    def update(mode,idx,_version,selected_obstruction_only,simplify_subgraph,simplify_method,knot_idx,_kv,view_dim,_thickness_index):
+    Input("view-dim","value"),Input("edge-thickness","value"),
+    Input("rainbow-backbone","value"),Input("edge-color-attr","value"))
+    def update(mode,idx,_version,selected_obstruction_only,simplify_subgraph,simplify_method,knot_idx,_kv,view_dim,_thickness_index,rainbow,color_attr):
         g=state['G']
         def finalize(elements):
             if view_dim != "2d":
                 return elements
             node_pos_3d={str(n): coordinates for n,coordinates in state['node_pos_3d'].items()}
             thickness=EDGE_THICKNESS_VALUES[_thickness_index] if _thickness_index is not None else 1.0
-            return elements + _crossing_overlay_elements(elements,node_pos_3d,thickness)
+            colors={**edge_color_map(g,color_attr),**(rainbow_backbone_map(g) if rainbow else {})}
+            colors={frozenset(map(str,e)):c for e,c in colors.items()}
+            return elements + _crossing_overlay_elements(elements,node_pos_3d,thickness,colors)
         if mode=="knots":
             sel=knotted_loop_selection(knot_idx)
             if sel is None:
                 return finalize(build_elements(g,state['pos']))
             if "on" in (selected_obstruction_only or []):
-                return finalize(build_elements(g.edge_subgraph(sel[1]),state['pos'],sel[0],sel[1],True,"knotted"))
+                return finalize(build_elements(g.edge_subgraph(tuple(e) for e in sel[1]),state['pos'],sel[0],sel[1],True,"knotted"))
             return finalize(build_elements(g,state['pos'],sel[0],sel[1],True,"knotted"))
         if mode=="original":
             return finalize(build_elements(g,state['pos']))
@@ -1470,7 +1466,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             if sel is None:
                 return build_3d_figure(g,node_pos_3d,edge_colors=edge_colors,show_grid=show_grid,thickness=thickness,font_size=font_size)
             if "on" in (selected_obstruction_only or []):
-                return build_3d_figure(g.edge_subgraph(sel[1]),node_pos_3d,sel[0],sel[1],True,edge_colors,show_grid,thickness,font_size,KNOT_COLOR)
+                return build_3d_figure(g.edge_subgraph(tuple(e) for e in sel[1]),node_pos_3d,sel[0],sel[1],True,edge_colors,show_grid,thickness,font_size,KNOT_COLOR)
             return build_3d_figure(g,node_pos_3d,sel[0],sel[1],True,edge_colors,show_grid,thickness,font_size,KNOT_COLOR)
         if mode=="highlight":
             return build_3d_figure(g,node_pos_3d,state['obs_nodes'],state['obs_edges'],True,edge_colors,show_grid,thickness,font_size)
