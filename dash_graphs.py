@@ -1090,7 +1090,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     def make_title(t,g):
         return f"{t} - Planar: {state['planar']}, Nodes: {g.number_of_nodes()}, Edges: {g.number_of_edges()}"
 
-    GRAPH_BOX_STYLE={"width":"100%","height":"750px"}
+    GRAPH_BOX_STYLE={"width":"100%","height":"calc(100vh - 190px)","minHeight":"500px"}
     CONTROL_GROUP={"display":"flex","alignItems":"center","gap":"6px"}
 
     def container_style(hidden,grid):
@@ -1103,16 +1103,16 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
 
     app=Dash(__name__, requests_pathname_prefix=_path_prefix(), routes_pathname_prefix=_path_prefix())
     FONT="'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
-    PANEL={"background":"#f4f7fb","border":"1px solid #d5deea","borderRadius":"10px","padding":"10px 14px",
-           "display":"flex","flexDirection":"column","gap":"8px","minWidth":"230px","flex":"1 1 230px"}
+    PANEL={"background":"#f4f7fb","border":"1px solid #d5deea","borderRadius":"10px","padding":"5px 8px",
+           "display":"flex","flexDirection":"column","gap":"3px","minWidth":"0","flex":"1 1 auto"}
     PANEL_TITLE={"fontWeight":"600","fontSize":"12px","letterSpacing":"0.06em","textTransform":"uppercase",
-                 "color":"#1565c0","borderBottom":"2px solid #1976d2","paddingBottom":"3px"}
-    ROW={"display":"flex","alignItems":"center","gap":"8px","flexWrap":"wrap"}
-    LABEL={"fontSize":"13px","color":"#37474f","minWidth":"70px"}
+                 "color":"#1565c0","borderBottom":"2px solid #1976d2","paddingBottom":"1px"}
+    ROW={"display":"flex","alignItems":"center","gap":"4px 6px","flexWrap":"wrap"}
+    LABEL={"fontSize":"12px","color":"#37474f","minWidth":"0"}
     BTN={"background":"#e3eefb","color":"#0d47a1","border":"1px solid #90b4e0","borderRadius":"6px",
-         "padding":"5px 12px","cursor":"pointer"}
+         "padding":"2px 8px","fontSize":"12px","cursor":"pointer"}
     BTN_PRIMARY={**BTN,"background":"#1976d2","color":"white","border":"1px solid #1565c0","fontWeight":"600"}
-    OPT={"marginRight":"12px","fontSize":"13px"}
+    OPT={"marginRight":"8px","fontSize":"12px"}
 
     def panel(title,*rows,style=None):
         return html.Div([html.Div(title,style=PANEL_TITLE),*rows],style={**PANEL,**(style or {})})
@@ -1120,20 +1120,20 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     THICKNESS_VALUES=EDGE_THICKNESS_VALUES
     app.layout=html.Div([
     html.H3(id="title-text",children=make_title(title,G),
-            style={"margin":"6px 0","color":"#0d47a1","fontWeight":"600"}),
+            style={"margin":"2px 0","fontSize":"16px","color":"#0d47a1","fontWeight":"600"}),
     html.Div([
         panel("Data",
         html.Div([
         dcc.Dropdown(id="pdbid-input",placeholder="PDB ID",value=pdbid or None,clearable=False,
                    options=[{"label":p,"value":p} for p in list(dict.fromkeys(list_data_pdbids()+([pdbid] if pdbid else [])))],
-                   style={"width":"130px"}),
+                   style={"width":"110px","height":"26px","minHeight":"26px"}),
         dcc.RadioItems(id="source-type",inline=True,value="topoly" if is_topoly else "simplified",
         options=[{"label":"Topoly","value":"topoly"},{"label":"Simplified","value":"simplified"}],
         labelStyle=OPT),
         ],style=ROW),
         html.Div([
         html.Label("Reduction",style=LABEL),
-        dcc.Dropdown(id="topoly-reduce",clearable=False,style={"width":"110px"},
+        dcc.Dropdown(id="topoly-reduce",clearable=False,style={"width":"110px","height":"26px","minHeight":"26px"},
         value=TopolyReduce.INTERNAL,options=TOPOLY_REDUCE_OPTIONS),
         html.Label("Numbering",style=LABEL),
         dcc.RadioItems(id="topoly-numbering",inline=True,value="auth",options=[
@@ -1165,16 +1165,14 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                       value=[],labelStyle=OPT),
         html.Div([
             html.Label("Method",style={**LABEL,"minWidth":"auto"}),
-            dcc.Dropdown(id="simplify-method",clearable=False,style={"width":"120px"},
+            dcc.Dropdown(id="simplify-method",clearable=False,style={"width":"120px","height":"26px","minHeight":"26px"},
                          value="kmt",options=TOPOLY_SUBGRAPH_REDUCE_OPTIONS),
         ],id="simplify-method-container",style={**CONTROL_GROUP,"display":"none"}),
         ],style=ROW),
         html.Div([
         html.Button("< Prev",id="prev-btn",n_clicks=0,style=BTN),
         html.Button("Next >",id="next-btn",n_clicks=0,style=BTN),
-        html.Span(id="subgraph-info",style={"fontSize":"13px","color":"#37474f"}),
-        ],style=ROW),
-        html.Div([
+        html.Span(id="subgraph-info",style={"fontSize":"12px","color":"#37474f"}),
         dcc.Checklist(id="homfly-test",
                       options=[{"label":"Test knot (HOMFLY 500)","value":"on"}],
                       value=[],labelStyle=OPT),
@@ -1198,32 +1196,28 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         dcc.RadioItems(id="view-dim",inline=True,value="3d",options=[
         {"label":"2D","value":"2d"},{"label":"3D","value":"3d"}],labelStyle=OPT),
         dcc.Checklist(id="show-grid",options=[{"label":"Show grid","value":"grid"}],value=["grid"],labelStyle=OPT),
+        html.Button("3D to HTML",id="export-3d-btn",n_clicks=0,title="Export 3D view to HTML",
+                    style={**BTN,"whiteSpace":"nowrap"}),
+        dcc.Download(id="export-3d-download"),
         ],style=ROW),
         html.Div([
         html.Label("Color edges by",style=LABEL),
-        dcc.Dropdown(id="edge-color-attr",clearable=False,style={"width":"150px"},
+        dcc.Dropdown(id="edge-color-attr",clearable=False,style={"width":"110px","height":"26px","minHeight":"26px"},
         value="type" if "type" in edge_attr_keys(G) else "none",
         options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(G)]),
         dcc.Checklist(id="rainbow-backbone",options=[{"label":"Rainbow backbone","value":"on"}],value=[],labelStyle=OPT),
         ],style=ROW),
         html.Div([
         html.Label("Label font size",style=LABEL),
-        dcc.Dropdown(id="node-font-size",clearable=False,style={"width":"90px"},value=14,
+        dcc.Dropdown(id="node-font-size",clearable=False,style={"width":"90px","height":"26px","minHeight":"26px"},value=14,
                      options=[{"label":str(v),"value":v} for v in NODE_FONT_SIZES]),
-        ],style=ROW),
-        html.Div([
         html.Label("Edge thickness",style=LABEL),
         html.Div(dcc.Slider(id="edge-thickness",min=0,max=len(THICKNESS_VALUES)-1,step=1,value=THICKNESS_VALUES.index(1),
                             marks={i:str(v) for i,v in enumerate(THICKNESS_VALUES)},included=False),
-                 style={"width":"260px","paddingBottom":"6px"}),
+                 style={"width":"150px","paddingBottom":"4px"}),
         ],style=ROW)),
-        panel("Export",
-        html.Button("3D to HTML",id="export-3d-btn",n_clicks=0,title="Export 3D view to HTML",
-                    style={**BTN,"padding":"5px 8px","whiteSpace":"nowrap"}),
-        dcc.Download(id="export-3d-download"),
-        style={"minWidth":"0","flex":"0 0 auto","width":"110px"}),
-    ],style={"display":"flex","flexWrap":"wrap","gap":"12px","alignItems":"stretch","marginTop":"8px"}),
-    html.Div(id="edge-color-legend",style={"margin":"8px 0"}),
+    ],style={"display":"flex","flexWrap":"nowrap","gap":"6px","alignItems":"stretch","marginTop":"2px"}),
+    html.Div(id="edge-color-legend",style={"margin":"2px 0"}),
     dcc.Store(id="graph-version",data=0),
     dcc.Store(id="subgraph-index",data=0),
     dcc.Store(id="knot-index",data=0),
@@ -1231,7 +1225,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     dcc.Interval(id="knot-poll",interval=2000,disabled=True),
     cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,style=container_style(False,False)),
     dcc.Graph(id="graph-3d",style=container_style(True,False),config={"displayModeBar":False}),
-    ],style={"fontFamily":FONT,"padding":"8px 14px"})
+    ],style={"fontFamily":FONT,"padding":"4px 10px"})
 
     @app.callback(Output("topoly-reduce-container","style"),Input("source-type","value"))
     def toggle_topoly_reduce(source_type):
