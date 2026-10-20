@@ -371,8 +371,8 @@ def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=Fal
                       zeroline=False,showbackground=True,backgroundcolor="#f2f2f2")
     else:
         axis_cfg=dict(visible=False)
-    fig.update_layout(showlegend=False,margin=dict(l=0,r=0,t=0,b=0),
-        scene=dict(xaxis=axis_cfg,yaxis=axis_cfg,zaxis=axis_cfg,
+    fig.update_layout(showlegend=False,margin=dict(l=0,r=0,t=0,b=0),uirevision="keep",
+        scene=dict(uirevision="keep",xaxis=axis_cfg,yaxis=axis_cfg,zaxis=axis_cfg,
         aspectmode="data"))
     return fig
 
@@ -1279,11 +1279,11 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         ],style=ROW)),
         panel("Find",
         html.Div([
-        dcc.Loading(type="dot",children=[html.Div([
+        html.Div([
             html.Button("K_3,3",id="find-k33-btn",n_clicks=0,style=BTN_PRIMARY),
             html.Button("K_5 minor",id="find-k5-btn",n_clicks=0,style=BTN_PRIMARY),
             html.Span(id="find-message",style={"fontSize":"12px","color":"crimson"}),
-        ],style=ROW)],style={"display":"inline-block"}),
+        ],style=ROW),
         ],style=ROW),
         html.Div([
         html.Button("< Prev",id="prev-btn",n_clicks=0,style=BTN),
@@ -1291,12 +1291,12 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Span(id="subgraph-info",style={"fontSize":"12px","color":"#37474f"}),
         ],style=ROW),
         html.Div([
-        dcc.Loading(type="dot",children=[html.Div([
+        html.Div([
             html.Button("Knot within",id="within-btn",n_clicks=0,style=BTN_PRIMARY),
             html.Button("< Prev knot",id="within-prev-btn",n_clicks=0,style=BTN),
             html.Button("Next knot >",id="within-next-btn",n_clicks=0,style=BTN),
             html.Span(id="within-info",style={"fontSize":"13px","fontWeight":"600","color":"#e65100"}),
-        ],style=ROW)],style={"display":"inline-block"}),
+        ],style=ROW),
         ],style=ROW),
         html.Div([
         html.Button("Simplify",id="simplify-btn",n_clicks=0,style=BTN),
