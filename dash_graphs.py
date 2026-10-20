@@ -1207,7 +1207,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     def recompute(g,method="ogdf",params=None):
         node_pos_3d=get_node_positions_3d(g)
         pos={n:(coord[0],coord[1]) for n,coord in node_pos_3d.items()}
-        state.update(G=g,pos=pos,node_pos_3d=node_pos_3d,knotted_loops=[],within=None,obs_method=method,graph_params=params or {},
+        state.update(G=g,pos=pos,node_pos_3d=node_pos_3d,knotted_loops=[],within_cache={},within_job=None,obs_method=method,graph_params=params or {},
                      **compute_obstructions(g,pos,method))
     recompute(G,params=dict(pdbid=pdbid or None,source="topoly" if is_topoly else "simplified",
                             reduce=str(TopolyReduce.INTERNAL),numbering="auth",merge_residues=False))
@@ -1371,6 +1371,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     dcc.Store(id="knot-version",data=0),
     dcc.Store(id="within-index",data=0),
     dcc.Store(id="within-version",data=0),
+    dcc.Interval(id="within-poll",interval=1500,disabled=True),
     dcc.Interval(id="knot-poll",interval=2000,disabled=True),
     cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,style=container_style(False,False)),
     dcc.Graph(id="graph-3d",style=container_style(True,False),config={"displayModeBar":False}),
@@ -1589,7 +1590,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             res=compute_obstructions(state['G'],state['pos'],method)
         except Exception as e:
             return no_update,no_update,no_update,no_update,f"{FAMILY_LABELS[method]} search failed: {e}"
-        state.update(res,obs_method=method,within=None)
+        state.update(res,obs_method=method,within_cache={},within_job=None)
         found=bool(res['multi_subgraphs'])
         return (version or 0)+1,0,"multi" if found else "original",["on"] if found else [],""
 
@@ -1610,10 +1611,48 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         selected=state['G'].edge_subgraph(sub.edges())
         return get_simplified_subgraph(idx,selected,method=method) if simplified else selected
 
+    def compute_within(idx,simplified,method):
+        """Knotted loops within one K_3,3 / K_5 minor (cached per subgraph, simplification and method)."""
+        cache=state.setdefault('within_cache',{})
+        key=within_key(idx,simplified,method)
+        if key not in cache:
+            try:
+                loops=find_knotted_loops(displayed_subgraph(idx,simplified,method),state.get('node_pos_3d'),tries=500,
+                                         params=dict(state.get('graph_params',{}),within=state['obs_method'],
+                                                     subgraph_index=idx,simplified=simplified,
+                                                     simplify_method=method if simplified else None))
+                cache[key]=dict(loops=loops)
+            except Exception as e:
+                cache[key]=dict(loops=[],error=str(e))
+        return cache[key]
+
+    def run_within_job(job,start,method):
+        subs=state['multi_subgraphs']
+        n=len(subs)
+        order=[(i%n) for i in range(start,start+n)]
+        for simplified in (False,True):
+            for i in order:
+                if state.get('within_job') is not job:
+                    return
+                compute_within(i,simplified,method)
+                job['progress']+=1
+        job['running']=False
+
+    def start_within_job(start,method):
+        subs=state['multi_subgraphs']
+        job=state.get('within_job')
+        if not subs or (job and job['subs'] is subs and job['method']==method):
+            return
+        job=dict(subs=subs,method=method,running=True,progress=0,total=2*len(subs))
+        state['within_job']=job
+        threading.Thread(target=run_within_job,args=(job,start,method),daemon=True).start()
+
     def within_selection(idx,simplified,method,widx):
         """(nodes, edges) of the chosen knotted loop within the shown subgraph, or None if not computed for it."""
-        w=state.get('within')
-        if not w or not w['loops'] or not state['multi_subgraphs'] or w['key']!=within_key(idx,simplified,method):
+        if not state['multi_subgraphs'] or state.get('obs_method') not in FAMILY_LABELS:
+            return None
+        w=state.get('within_cache',{}).get(within_key(idx,simplified,method))
+        if not w or not w['loops']:
             return None
         nodes=w['loops'][widx%len(w['loops'])]['nodes']
         edges={frozenset((nodes[i],nodes[(i+1)%len(nodes)])) for i in range(len(nodes))}
@@ -1623,9 +1662,11 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         name=FAMILY_LABELS.get(state.get('obs_method'))
         if not name or not state['multi_subgraphs']:
             return ""
-        w=state.get('within')
-        if not w or w['key']!=within_key(idx,simplified,method):
-            return f"Click 'Knot within' to look for knots in this {name}."
+        job=state.get('within_job')
+        running=bool(job and job['subs'] is state['multi_subgraphs'] and job['running'])
+        w=state.get('within_cache',{}).get(within_key(idx,simplified,method))
+        if not w:
+            return "Searching for knots in the background..." if running else f"Click 'Knot within' to look for knots in this {name}."
         if 'error' in w:
             return f"Knot search failed: {w['error']}"
         loops=w['loops']
@@ -1638,34 +1679,42 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         return f"Knot {widx%len(loops)+1} of {len(loops)}: {knot}, P={k['prob']:.2f}"
 
     @app.callback(Output("within-index","data"),Output("within-version","data"),Output("within-info","children"),
+    Output("within-poll","disabled"),
     Input("within-btn","n_clicks"),Input("within-prev-btn","n_clicks"),Input("within-next-btn","n_clicks"),
     Input("subgraph-index","data"),Input("graph-version","data"),Input("simplify-subgraph","value"),Input("simplify-method","value"),
+    Input("within-poll","n_intervals"),
     State("within-index","data"),State("within-version","data"),prevent_initial_call=True)
-    def within_controls(_b,_p,_n,sub_idx,_gv,simplify_val,method,widx,version):
+    def within_controls(_b,_p,_n,sub_idx,_gv,simplify_val,method,_poll,widx,version):
         simplified="on" in (simplify_val or [])
         method=method or "kmt"
         widx=widx or 0
         trigger=ctx.triggered_id
         n_sub=len(state['multi_subgraphs'])
+        in_family=state.get('obs_method') in FAMILY_LABELS
         sub_idx=(sub_idx or 0)%n_sub if n_sub else 0
+        if n_sub and in_family:
+            start_within_job(sub_idx,"kmt")
+        job=state.get('within_job')
+        running=bool(n_sub and job and job['subs'] is state['multi_subgraphs'] and job['running'])
         key=within_key(sub_idx,simplified,method)
         if trigger=="within-btn":
-            if not n_sub or state.get('obs_method') not in FAMILY_LABELS:
-                return 0,no_update,"Find a K_3,3 or K_5 minor first."
-            target=displayed_subgraph(sub_idx,simplified,method)
-            try:
-                loops=find_knotted_loops(target,state.get('node_pos_3d'),tries=500,
-                                         params=dict(state.get('graph_params',{}),within=state['obs_method'],
-                                                     subgraph_index=sub_idx,simplified=simplified))
-                state['within']=dict(key=key,loops=loops)
-            except Exception as e:
-                state['within']=dict(key=key,loops=[],error=str(e))
-            return 0,(version or 0)+1,within_status(sub_idx,simplified,method,0)
-        w=state.get('within')
-        if trigger in ("within-prev-btn","within-next-btn") and w and w['key']==key and w['loops']:
-            widx=(widx+(1 if trigger=="within-next-btn" else -1))%len(w['loops'])
-            return widx,(version or 0)+1,within_status(sub_idx,simplified,method,widx)
-        return widx,no_update,within_status(sub_idx,simplified,method,widx)
+            if not n_sub or not in_family:
+                return 0,no_update,"Find a K_3,3 or K_5 minor first.",not running
+            compute_within(sub_idx,simplified,method)
+            return 0,(version or 0)+1,within_status(sub_idx,simplified,method,0),not running
+        if trigger=="within-poll":
+            seen=state.get('within_seen')
+            progress=(id(job),job['progress']) if job else None
+            state['within_seen']=progress
+            changed=progress!=seen
+            return no_update,(version or 0)+1 if changed else no_update,within_status(sub_idx,simplified,method,widx),not running
+        w=state.get('within_cache',{}).get(key)
+        if trigger in ("within-prev-btn","within-next-btn"):
+            if w and w['loops']:
+                widx=(widx+(1 if trigger=="within-next-btn" else -1))%len(w['loops'])
+                return widx,(version or 0)+1,within_status(sub_idx,simplified,method,widx),not running
+            return widx,no_update,within_status(sub_idx,simplified,method,widx),not running
+        return 0,(version or 0)+1,within_status(sub_idx,simplified,method,0),not running
 
     @app.callback(Output("graph","stylesheet"),Output("edge-color-legend","children"),
     Input("edge-color-attr","value"),Input("graph-version","data"),Input("rainbow-backbone","value"),Input("node-font-size","value"),
