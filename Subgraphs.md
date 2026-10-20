@@ -69,6 +69,22 @@ A loop is a cycle, so it can never be identical to a Kuratowski subdivision or a
 
 Say if you meant a different comparison and I'll change it.
 
-When the app runs from the `.venv` without Sage, the SageMath part shows "n/a (SageMath worker failed: …)".
 
-The change is in `dash_graphs.py`, in `annotate_knotted_loops`, `obstruction_summary` and `knot_status`.
+
+I fixed the dangling edges in the K_5 models. I couldn't reproduce the 1A8E result, and the knot message is now clearer but I haven't found what caused your error.
+
+**1A8E "Found 4 K_5 minor models"**
+- I can't reproduce this. I ran the finder on 1A8E with the Simplified graph, and with the Topoly graph under every reduce, numbering and merge-residues setting. It finds 0 each time, which matches `Subgraphs.md`.
+- 4DOU gives exactly 4 models. My guess is you were looking at stale panel text or a different graph. Please try again: load 1A8E fresh, then choose K5 minor.
+- If you still get 4, tell me which Source, Simplification and merge settings you used.
+
+**Valence-1 edges in 4DOU (fixed)**
+- Contracting a group of nodes into one K_5 vertex could leave dangling edges that none of the 10 K_5 connections use. `find_k5_minors` now strips those, so no model has a vertex of valence 1.
+- After the fix, the four 4DOU models have no degree-1 vertices.
+
+**Knot in the K_5 minor**
+- I didn't see the error you got. The HOMFLY test now runs on the cleaned 4DOU models, using 50 tries as a quick check rather than the app's 500. The four models came back as 4_1, 3_1, 3_1 and 0_1. The dangling edges may have been what upset it, but I haven't confirmed that.
+- The "knotted loops" mode searches the whole loaded graph, not the K_5. I added "in the whole graph (not limited to a K_5 minor/Kuratowski subgraph)" to the status line and made the hint text say the same.
+- To get the knot type of the K_5 itself, use "Run HOMFLY" or "Test knot (HOMFLY 500)", which test the obstruction shown.
+
+The changes are in `dash_graphs.py`. I didn't run the full app UI after them.

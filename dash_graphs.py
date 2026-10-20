@@ -619,6 +619,11 @@ def find_k5_minors(graph, max_results=20, time_limit=60):
             if not hit:
                 break
             model = nx.Graph(hit)
+            # contracted branch sets can keep dangling tree edges that no K_5 edge uses
+            leaves = [n for n in model if model.degree(n) <= 1]
+            while leaves:
+                model.remove_nodes_from(leaves)
+                leaves = [n for n in model if model.degree(n) <= 1]
             model.graph['kind'] = 'K_5 minor'
             results.append(model)
             work.remove_edge(*hit[0])
@@ -1283,7 +1288,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Button("Next >",id="knot-next-btn",n_clicks=0,style=BTN),
         html.Span(id="knot-info",style={"fontSize":"13px","color":"#37474f"}),
         ],style=ROW),
-        html.Div("Knotted: P(unknot) < 0.5 and P(knot) >= 0.48 (HOMFLY, 500 tries). Select the 'Knotted loops' mode to view.",
+        html.Div("Knotted: P(unknot) < 0.5 and P(knot) >= 0.48 (HOMFLY, 500 tries). Loops are searched in the whole loaded graph, not in the shown obstruction subgraph. Select the 'Knotted loops' mode to view.",
                  style={"fontSize":"12px","color":"#607d8b"})),
         panel("Appearance",
         html.Div([
@@ -1384,7 +1389,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if not loops:
             return "No knotted loops found." if job else "Click 'Find knotted loops'."
         k=loops[idx%len(loops)]
-        text=(f"{len(loops)} knotted loop(s) - showing {idx%len(loops)+1}: {k['knot']} "
+        text=(f"{len(loops)} knotted loop(s) in the whole graph (not limited to a K_5 minor/Kuratowski subgraph) - showing {idx%len(loops)+1}: {k['knot']} "
               f"(P(knot)={k['prob']:.2f}, P(unknot)={k['unknot_prob']:.2f}, {len(k['nodes'])} nodes)")
         return [text,html.Br(),html.Span(obstruction_summary(k),style={"fontSize":"12px","color":"#1565c0"})]
 
