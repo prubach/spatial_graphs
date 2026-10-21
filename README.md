@@ -23,7 +23,8 @@ After choosing a protein, the "Find" panel works as follows:
 - "Next/Prev" steps through the results.
 - "Knot within" looks for knotted loops inside the shown K_3,3 / K_5 minor and highlights one in orange with its knot type and handedness (e.g. +3_1 vs -3_1). "Next knot" / "Prev knot" step through them.
 - Knots within all K_3,3 / K_5 minors are computed in the background right after a search (starting from the shown one), so Next/Prev show results immediately once ready; the status line says while it is still searching.
-- "Simplify" shows the simplified subgraph (method selectable); "Knot within" then works on the simplified subgraph.
+- "Highlight knot in full graph" (on by default) colours the knotted loop orange in the full graph when "Show selected obstruction only" is off.
+- "Simplify" (always KMT; also turns on "Show selected obstruction only") shows the simplified subgraph; "Knot within" then works on the simplified subgraph.
 
 ## Knotted loops vs "Run HOMFLY" button
 
@@ -59,3 +60,5 @@ The "Advanced" button in the "Find" panel (hidden by default) reveals the origin
 ## Knot cache
 
 Knot results are cached in `knot_cache/` as `<pdbid>_<source>_<within>_<subgraph index>_<nodes>n_<hash>.json`. Each file holds the parameters, the nodes of the analyzed graph, the knotted loops (`loops`) and every analyzed loop with its HOMFLY result (`loops_analyzed`), including the unknotted ones.
+
+In the 2D view edges are drawn thick (adjustable with the thickness slider) and the over/under crossing markers follow nodes when you drag them (`assets/crossings.js`); markers whose edges no longer cross are hidden.

@@ -63,6 +63,9 @@ def build_elements(graph,pos,obs_nodes=set(),obs_edges=set(),highlight=False,cls
     return els
 
 
+EDGE_2D_SCALE = 2  # 2D edges are drawn this much thicker than the base width to resemble the 3D view
+
+
 def _crossing_overlay_elements(elements, node_pos_3d, edge_thickness=1.0, edge_colors=None):
     """Add visual overpasses for crossings in a 2D drawing, ranked by interpolated z.
     The over strand is drawn in its edge's color from `edge_colors` (frozenset of str ids -> hex)."""
@@ -138,9 +141,14 @@ def _crossing_overlay_elements(elements, node_pos_3d, edge_thickness=1.0, edge_c
                 "data": {
                     "id": f"crossing-marker-{len(markers)}",
                     "image": f"data:image/svg+xml;utf8,{quote(svg, safe='')}",
+                    "e1": [u, v], "e2": [a, b],
+                    "z1": [node_pos_3d[u][2], node_pos_3d[v][2]],
+                    "z2": [node_pos_3d[a][2], node_pos_3d[b][2]],
+                    "c1": edge_colors.get(frozenset((u, v)), '#222'),
+                    "c2": edge_colors.get(frozenset((a, b)), '#222'),
                 },
                 "position": {"x": x, "y": y},
-                "style": {"width": 24 * edge_thickness, "height": 24 * edge_thickness},
+                "style": {"width": 24 * EDGE_2D_SCALE * edge_thickness, "height": 24 * EDGE_2D_SCALE * edge_thickness},
                 "classes": "crossing-marker",
                 "selectable": False,
                 "grabbable": False,
@@ -151,9 +159,9 @@ def _crossing_overlay_elements(elements, node_pos_3d, edge_thickness=1.0, edge_c
 def edge_thickness_stylesheet(thickness):
     """Return Cytoscape edge widths scaled consistently with the 3D thickness control."""
     return [
-        {"selector": "edge", "style": {"width": 5 * thickness}},
-        {"selector": "edge.obstruction", "style": {"width": 16 * thickness}},
-        {"selector": "edge.knotted", "style": {"width": 16 * thickness}},
+        {"selector": "edge", "style": {"width": 5 * EDGE_2D_SCALE * thickness}},
+        {"selector": "edge.obstruction", "style": {"width": 16 * EDGE_2D_SCALE * thickness}},
+        {"selector": "edge.knotted", "style": {"width": 16 * EDGE_2D_SCALE * thickness}},
     ]
 
 
@@ -1241,12 +1249,6 @@ TOPOLY_REDUCE_OPTIONS=[
     {"label":"Full","value":TopolyReduce.FULL},
 ]
 
-TOPOLY_SUBGRAPH_REDUCE_OPTIONS=[
-    {"label":"KMT","value":"kmt"},
-    {"label":"Reidemeister","value":"reidemeister"},
-    {"label":"Easy","value":"easy"},
-]
-
 def list_data_pdbids(data_dir='data'):
     """PDB ids (with the chain appended when a simplified file names a chain other than A)
     for the structures available in the data folder."""
@@ -1408,7 +1410,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             html.Button("K_5 minor",id="find-k5-btn",n_clicks=0,style=BTN_PRIMARY),
             html.Button("Knotted K_3,3",id="find-k33knot-btn",n_clicks=0,style=BTN_PRIMARY,
                         title="K_3,3 subdivisions containing a knotted loop (may take a while)"),
-            html.Span(id="find-message",style={"fontSize":"12px","color":"crimson"}),
+            dcc.Loading(html.Span(id="find-message",style={"fontSize":"12px","color":"crimson"}),type="circle"),
         ],style=ROW),
         ],style=ROW),
         html.Div([
@@ -1426,11 +1428,6 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         ],style=ROW),
         html.Div([
         html.Button("Simplify",id="simplify-btn",n_clicks=0,style=BTN),
-        html.Div([
-            html.Label("Method",style={**LABEL,"minWidth":"auto"}),
-            dcc.Dropdown(id="simplify-method",clearable=False,style={"width":"120px","height":"26px","minHeight":"26px"},
-                         value="kmt",options=TOPOLY_SUBGRAPH_REDUCE_OPTIONS),
-        ],id="simplify-method-container",style={**CONTROL_GROUP,"display":"none"}),
         ],style=ROW),
         html.Div("Orange = knotted loop within the shown subgraph (sign = handedness).",
                  style={"fontSize":"12px","color":"#607d8b"}),
@@ -1451,6 +1448,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         dcc.Checklist(id="selected-obstruction-only",
                       options=[{"label":"Show selected obstruction only","value":"on"}],
                       value=[],labelStyle=OPT),
+        dcc.Checklist(id="knot-in-original",
+                      options=[{"label":"Highlight knot in full graph","value":"on"}],
+                      value=["on"],labelStyle=OPT),
         dcc.Checklist(id="simplify-subgraph",
                       options=[{"label":"Simplify subgraph","value":"on"}],
                       value=[],labelStyle=OPT),
@@ -1513,10 +1513,6 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     def toggle_topoly_reduce(source_type):
         return {**CONTROL_GROUP,"display":"flex" if source_type=="topoly" else "none"}
 
-    @app.callback(Output("simplify-method-container","style"),Input("simplify-subgraph","value"))
-    def toggle_simplify_method(simplify_val):
-        return {**CONTROL_GROUP,"display":"flex" if "on" in (simplify_val or []) else "none"}
-
     @app.callback(Output("title-text","children"),Output("edge-color-attr","options"),
     Output("edge-color-attr","value"),Output("mode","value"),
     Output("subgraph-index","data",allow_duplicate=True),Output("graph-version","data"),
@@ -1564,7 +1560,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     def knot_status(idx):
         job=state.get('knot_job')
         if job and job['running']:
-            return "Searching for knotted loops..."
+            return "Searching for knotted loops in the background (HOMFLY on all loops; may take a while)..."
         if job and job.get('error'):
             return f"Search failed: {job['error']}"
         loops=state.get('knotted_loops',[])
@@ -1720,10 +1716,14 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         found=bool(res['multi_subgraphs'])
         return (version or 0)+1,0,"multi" if found else "original",["on"] if found else [],""
 
-    @app.callback(Output("simplify-subgraph","value"),Input("simplify-btn","n_clicks"),State("simplify-subgraph","value"),
+    @app.callback(Output("simplify-subgraph","value"),Output("selected-obstruction-only","value",allow_duplicate=True),
+    Input("simplify-btn","n_clicks"),State("simplify-subgraph","value"),State("selected-obstruction-only","value"),
     prevent_initial_call=True)
-    def toggle_simplify(_n,value):
-        return [] if "on" in (value or []) else ["on"]
+    def toggle_simplify(_n,value,selected):
+        # the simplified view only exists for the selected obstruction alone, so turn that on with it
+        if "on" in (value or []):
+            return [],no_update
+        return ["on"],["on"]
 
     @app.callback(Output("simplify-btn","style"),Input("simplify-subgraph","value"))
     def simplify_button_style(value):
@@ -1784,6 +1784,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         edges=loop_edges(nodes)
         return set(nodes),edges
 
+    def full_graph_knot(idx,widx,enabled):
+        """Knotted loop within the shown obstruction as original-graph nodes/edges (the unsimplified search
+        is used because simplified subgraphs contain shortcut edges that don't exist in the graph)."""
+        if "on" not in (enabled or []):
+            return set(),set()
+        return within_selection(idx,False,"kmt",widx or 0) or (set(),set())
+
     def within_status(idx,simplified,method,widx):
         name=FAMILY_LABELS.get(state.get('obs_method'))
         if not name or not state['multi_subgraphs']:
@@ -1791,28 +1798,29 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         job=state.get('within_job')
         running=bool(job and job['subs'] is state['multi_subgraphs'] and job['running'])
         w=state.get('within_cache',{}).get(within_key(idx,simplified,method))
+        bg=f" [background search running: {job['progress']}/{job['total']} subgraph views done]" if running else ""
         if not w:
-            return "Searching for knots in the background..." if running else f"Click 'Knot within' to look for knots in this {name}."
+            return f"Searching for knots in the background...{bg}" if running else f"Click 'Knot within' to look for knots in this {name}."
         if 'error' in w:
             return f"Knot search failed: {w['error']}"
         loops=w['loops']
         if not loops:
-            return f"No knot found within this {name}."
+            return f"No knot found within this {name}.{bg}"
         k=loops[widx%len(loops)]
         knot=k['knot']
         if knot[0] not in "+-":
             knot+=" (achiral or handedness undetermined)"
-        return f"Knot {widx%len(loops)+1} of {len(loops)}: {knot}, P={k['prob']:.2f}"
+        return f"Knot {widx%len(loops)+1} of {len(loops)}: {knot}, P={k['prob']:.2f}{bg}"
 
     @app.callback(Output("within-index","data"),Output("within-version","data"),Output("within-info","children"),
     Output("within-poll","disabled"),
     Input("within-btn","n_clicks"),Input("within-prev-btn","n_clicks"),Input("within-next-btn","n_clicks"),
-    Input("subgraph-index","data"),Input("graph-version","data"),Input("simplify-subgraph","value"),Input("simplify-method","value"),
+    Input("subgraph-index","data"),Input("graph-version","data"),Input("simplify-subgraph","value"),
     Input("within-poll","n_intervals"),
     State("within-index","data"),State("within-version","data"),prevent_initial_call=True)
-    def within_controls(_b,_p,_n,sub_idx,_gv,simplify_val,method,_poll,widx,version):
+    def within_controls(_b,_p,_n,sub_idx,_gv,simplify_val,_poll,widx,version):
         simplified="on" in (simplify_val or [])
-        method=method or "kmt"
+        method="kmt"
         widx=widx or 0
         trigger=ctx.triggered_id
         n_sub=len(state['multi_subgraphs'])
@@ -1852,7 +1860,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                        for (u,v),c in ((tuple(e),c) for e,c in rainbow_backbone_map(g).items())] if rainbow else []
         rainbow_rules+=[{"selector":f'edge[source = "{v}"][target = "{u}"]',"style":r["style"]} for r in rainbow_rules for u,v in [(r["selector"].split('"')[3],r["selector"].split('"')[1])]]
         stylesheet=BASE_STYLE+[{"selector":"node","style":{"font-size":f"{font_size or 18}px"}},
-            {"selector":".crossing-marker","style":{"width":24,"height":24,"shape":"rectangle",
+            {"selector":".crossing-marker","style":{"width":24*EDGE_2D_SCALE,"height":24*EDGE_2D_SCALE,"shape":"rectangle",
              "background-opacity":0,"background-image":"data(image)","background-fit":"contain",
              "border-width":0}}]+edge_color_stylesheet(g,attr)+rainbow_rules+OBSTRUCTION_STYLE+KNOT_STYLE
         stylesheet+=edge_thickness_stylesheet(thickness)
@@ -1865,11 +1873,11 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     @app.callback(Output("graph","elements"),
     Input("mode","value"),Input("subgraph-index","data"),Input("graph-version","data"),
     Input("selected-obstruction-only","value"),Input("simplify-subgraph","value"),
-    Input("simplify-method","value"),Input("knot-index","data"),Input("knot-version","data"),
+    Input("knot-index","data"),Input("knot-version","data"),
     Input("view-dim","value"),Input("edge-thickness","value"),
     Input("rainbow-backbone","value"),Input("edge-color-attr","value"),
-    Input("within-index","data"),Input("within-version","data"))
-    def update(mode,idx,_version,selected_obstruction_only,simplify_subgraph,simplify_method,knot_idx,_kv,view_dim,_thickness_index,rainbow,color_attr,widx,_wv):
+    Input("within-index","data"),Input("within-version","data"),Input("knot-in-original","value"))
+    def update(mode,idx,_version,selected_obstruction_only,simplify_subgraph,knot_idx,_kv,view_dim,_thickness_index,rainbow,color_attr,widx,_wv,knot_in_full):
         g=state['G']
         def finalize(elements):
             if view_dim != "2d":
@@ -1900,14 +1908,15 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             if "on" in (selected_obstruction_only or []):
                 selected_graph=g.edge_subgraph(sub.edges())
                 simplified="on" in (simplify_subgraph or [])
-                knot=within_selection(idx,simplified,simplify_method or "kmt",widx or 0) or (set(),set())
+                knot=within_selection(idx,simplified,"kmt",widx or 0) or (set(),set())
                 if simplified:
-                    simp_g=get_simplified_subgraph(idx,selected_graph,method=simplify_method or "kmt")
+                    simp_g=get_simplified_subgraph(idx,selected_graph,method="kmt")
                     return finalize(build_elements(simp_g,state['pos'],set(simp_g.nodes()),{frozenset(e) for e in simp_g.edges()},True,
                                                    knot_nodes=knot[0],knot_edges=knot[1]))
                 return finalize(build_elements(selected_graph,state['pos'],sub_nodes,sub_edges,True,
                                                knot_nodes=knot[0],knot_edges=knot[1]))
-            return finalize(build_elements(g,state['pos'],sub_nodes,sub_edges,True))
+            knot=full_graph_knot(idx,widx,knot_in_full)
+            return finalize(build_elements(g,state['pos'],sub_nodes,sub_edges,True,knot_nodes=knot[0],knot_edges=knot[1]))
         return finalize(build_elements(state['obs'],state['obs_pos']))
 
     @app.callback(Output("graph","style"),Output("graph-3d","style"),
@@ -1934,9 +1943,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     Input("graph-version","data"),Input("show-grid","value"),
     Input("rainbow-backbone","value"),Input("edge-thickness","value"),Input("node-font-size","value"),
     Input("selected-obstruction-only","value"),Input("simplify-subgraph","value"),
-    Input("simplify-method","value"),Input("knot-index","data"),Input("knot-version","data"),
-    Input("within-index","data"),Input("within-version","data"))
-    def update_3d(mode,idx,attr,_version,grid_value,rainbow,thickness,font_size,selected_obstruction_only,simplify_subgraph,simplify_method,knot_idx,_kv,widx,_wv):
+    Input("knot-index","data"),Input("knot-version","data"),
+    Input("within-index","data"),Input("within-version","data"),Input("knot-in-original","value"))
+    def update_3d(mode,idx,attr,_version,grid_value,rainbow,thickness,font_size,selected_obstruction_only,simplify_subgraph,knot_idx,_kv,widx,_wv,knot_in_full):
         font_size=font_size or 18
         g=state['G']
         node_pos_3d=state['node_pos_3d']
@@ -1965,15 +1974,17 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             if "on" in (selected_obstruction_only or []):
                 selected_graph=g.edge_subgraph(sub.edges())
                 simplified="on" in (simplify_subgraph or [])
-                knot=within_selection(idx,simplified,simplify_method or "kmt",widx or 0) or (set(),set())
+                knot=within_selection(idx,simplified,"kmt",widx or 0) or (set(),set())
                 if simplified:
-                    simp_g=get_simplified_subgraph(idx,selected_graph,method=simplify_method or "kmt")
+                    simp_g=get_simplified_subgraph(idx,selected_graph,method="kmt")
                     simp_edge_colors={**edge_color_map(simp_g,attr),**(rainbow_backbone_map(simp_g) if rainbow else {})}
                     return build_3d_figure(simp_g,node_pos_3d,set(simp_g.nodes()),{frozenset(e) for e in simp_g.edges()},True,
                                            simp_edge_colors,show_grid,thickness,font_size,knot_nodes=knot[0],knot_edges=knot[1])
                 return build_3d_figure(selected_graph,node_pos_3d,sub_nodes,sub_edges,True,
                                        edge_colors,show_grid,thickness,font_size,knot_nodes=knot[0],knot_edges=knot[1])
-            return build_3d_figure(g,node_pos_3d,sub_nodes,sub_edges,True,edge_colors,show_grid,thickness,font_size)
+            knot=full_graph_knot(idx,widx,knot_in_full)
+            return build_3d_figure(g,node_pos_3d,sub_nodes,sub_edges,True,edge_colors,show_grid,thickness,font_size,
+                                   knot_nodes=knot[0],knot_edges=knot[1])
         obs=state['obs']
         obs_pos_3d={n:node_pos_3d[n] for n in obs.nodes()} if not state['planar'] else {}
         return build_3d_figure(obs,obs_pos_3d,edge_colors={**edge_color_map(obs,attr),**rainbow_colors},show_grid=show_grid,thickness=thickness,font_size=font_size)
@@ -1985,10 +1996,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         Input("graph-version","data"),
         Input("mode","value"),
         Input("selected-obstruction-only","value"),
-        Input("simplify-subgraph","value"),
-        Input("simplify-method","value"))
+        Input("simplify-subgraph","value"))
     def update_homfly_knot(run_clicks,idx,_version,mode,
-                           selected_obstruction_only,simplify_subgraph,simplify_method):
+                           selected_obstruction_only,simplify_subgraph):
         try:
             triggered=ctx.triggered_id
         except Exception:
@@ -2006,7 +2016,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         state.setdefault('homfly_cache',{})
         multi_subgraphs=state.get('multi_subgraphs',[])
         is_simplified="on" in (simplify_subgraph or [])
-        method=simplify_method or "kmt"
+        method="kmt"
 
         if mode=="multi" and multi_subgraphs:
             n=len(multi_subgraphs)
