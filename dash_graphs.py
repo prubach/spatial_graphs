@@ -626,7 +626,7 @@ def find_k5_minors(graph, max_results=20, time_limit=60):
     negative = set()
     results = []
     try:
-        while len(results) < max_results:
+        while max_results is None or len(results) < max_results:
             hit = None
             for comp in nx.biconnected_components(work):
                 if len(comp) < 5:
@@ -746,6 +746,22 @@ def find_knotted_k33_subgraphs(graph, node_pos_3d=None, params=None, limit=100):
     return sorted(found.values(), key=lambda g: (g.number_of_nodes(), sorted(map(str, g.nodes()))))[:limit]
 
 
+def find_knotted_k5_minors(graph, node_pos_3d=None, params=None, max_results=None, time_limit=120):
+    """K_5 minor models that contain a knotted loop of `graph`.
+    Unlike the K_3,3 case, K_5 minors cannot be enumerated from the loops, so models are searched
+    until none remain or the time limit is reached."""
+    loops = [frozenset(loop_edges(lp['nodes'])) for lp in find_knotted_loops(graph, node_pos_3d, params=params)]
+    loops = [frozenset(frozenset(e) for e in lp) for lp in loops]
+    results = []
+    for model in find_k5_minors(graph, max_results=max_results, time_limit=time_limit):
+        edges = {frozenset(e) for e in model.edges()}
+        if any(lp <= edges for lp in loops):
+            model.graph['kind'] = 'K_5 minor'
+            model.graph['sources'] = ['knotted loop']
+            results.append(model)
+    return results
+
+
 def find_k33_subgraphs(graph):
     """All K_3,3 subdivisions found by OGDF and SageMath, merged and deduplicated by edge set.
     Each subgraph records in graph['sources'] which finder(s) reported it; a finder that fails is skipped."""
@@ -773,13 +789,15 @@ def find_k33_subgraphs(graph):
 
 
 def find_obstructions(graph, method="ogdf", **kwargs):
-    """Return the obstruction subgraphs of `graph` found by `method` ('ogdf', 'sage', 'k33' or 'k5')."""
+    """Return obstruction subgraphs found by `method`."""
     if method == "k33":
         return find_k33_subgraphs(graph)
     if method == "k5":
         return find_k5_minors(graph)
     if method == "k33knot":
         return find_knotted_k33_subgraphs(graph, **kwargs)
+    if method == "k5knot":
+        return find_knotted_k5_minors(graph, **kwargs)
     if method == "sage":
         return find_multiple_kuratowski_subgraphs_sage(graph)
     return find_multiple_kuratowski_subgraphs_ogdf(graph)
@@ -1331,7 +1349,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         multi_subgraphs=[]
         if not planar:
             multi_subgraphs=find_obstructions(g,method,**kwargs)
-            if method in ("sage","k5","k33","k33knot") and multi_subgraphs:
+            if method in ("sage","k5","k33","k33knot","k5knot") and multi_subgraphs:
                 obs=multi_subgraphs[0]
         return dict(planar=planar,obs=obs,
                     obs_nodes=set(obs.nodes()) if not planar else set(),
@@ -1419,6 +1437,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             html.Button("K_5 minor",id="find-k5-btn",n_clicks=0,style=BTN_PRIMARY),
             html.Button("Knotted K_3,3",id="find-k33knot-btn",n_clicks=0,style=BTN_PRIMARY,
                         title="K_3,3 subdivisions containing a knotted loop (may take a while)"),
+            html.Button("Knotted K_5 minor",id="find-k5knot-btn",n_clicks=0,style=BTN_PRIMARY,
+                        title="K_5 minors containing a knotted loop (may take a while)"),
             dcc.Loading(html.Span(id="find-message",style={"fontSize":"12px","color":"crimson"}),type="circle"),
         ],style=ROW),
         ],style=ROW),
@@ -1693,13 +1713,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         edges={e for e in edges if len(e)==2 and state['G'].has_edge(*e)}
         return set(nodes),edges
 
-    FAMILY_LABELS={"k33":"K_3,3","k5":"K_5 minor","k33knot":"Knotted K_3,3"}
+    FAMILY_LABELS={"k33":"K_3,3","k5":"K_5 minor","k33knot":"Knotted K_3,3","k5knot":"Knotted K_5 minor"}
 
     @app.callback(Output("subgraph-info","children"),Input("subgraph-index","data"),Input("graph-version","data"))
     def update_info(idx,_version):
         method=state.get('obs_method')
         if method not in FAMILY_LABELS:
-            return "Click K_3,3, K_5 minor or Knotted K_3,3."
+            return "Click K_3,3, K_5 minor, Knotted K_3,3 or Knotted K_5 minor."
         subgraphs=state['multi_subgraphs']
         n=len(subgraphs)
         name=FAMILY_LABELS[method]
@@ -1718,11 +1738,11 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     @app.callback(Output("graph-version","data",allow_duplicate=True),Output("subgraph-index","data",allow_duplicate=True),
     Output("mode","value",allow_duplicate=True),Output("selected-obstruction-only","value",allow_duplicate=True),
     Output("find-message","children"),
-    Input("find-k33-btn","n_clicks"),Input("find-k5-btn","n_clicks"),Input("find-k33knot-btn","n_clicks"),
+    Input("find-k33-btn","n_clicks"),Input("find-k5-btn","n_clicks"),Input("find-k33knot-btn","n_clicks"),Input("find-k5knot-btn","n_clicks"),
     State("graph-version","data"),prevent_initial_call=True)
-    def find_family(_k33,_k5,_k33knot,version):
-        method={"find-k33-btn":"k33","find-k33knot-btn":"k33knot"}.get(ctx.triggered_id,"k5")
-        extra=dict(node_pos_3d=state.get('node_pos_3d'),params=dict(state.get('graph_params',{}))) if method=="k33knot" else {}
+    def find_family(_k33,_k5,_k33knot,_k5knot,version):
+        method={"find-k33-btn":"k33","find-k33knot-btn":"k33knot","find-k5knot-btn":"k5knot"}.get(ctx.triggered_id,"k5")
+        extra=dict(node_pos_3d=state.get('node_pos_3d'),params=dict(state.get('graph_params',{}))) if method in ("k33knot","k5knot") else {}
         try:
             res=compute_obstructions(state['G'],state['pos'],method,**extra)
         except Exception as e:

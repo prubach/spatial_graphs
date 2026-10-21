@@ -20,6 +20,7 @@ The app is then available at `http://host:8014/spatialgraph/`.
 After choosing a protein, the "Find" panel works as follows:
 - "K_3,3" finds all K_3,3 subdivisions (OGDF and SageMath results are merged and deduplicated; the finder(s) that reported each one are shown). "K_5 minor" finds K_5 minors.
 - "Knotted K_3,3" lists K_3,3 subdivisions that contain a knotted loop of the whole graph (at most 100, smallest first). OGDF and SageMath report only a few subdivisions, which can all be unknotted, so these are enumerated from the knotted loops.
+- "Knotted K_5 minor" searches for K_5 minor models that contain a knotted loop of the whole graph. It searches until no more models are found or the 120-second time limit is reached; on timeout, the models found so far are returned.
 - "Next/Prev" steps through the results.
 - "Knot within" looks for knotted loops inside the shown K_3,3 / K_5 minor and highlights one in orange with its knot type and handedness (e.g. +3_1 vs -3_1). "Next knot" / "Prev knot" step through them.
 - Knots within all K_3,3 / K_5 minors are computed in the background right after a search (starting from the shown one), so Next/Prev show results immediately once ready; the status line says while it is still searching.
