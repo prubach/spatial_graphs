@@ -638,6 +638,97 @@ def find_k5_minors(graph, max_results=20, time_limit=60):
     return results
 
 
+def enumerate_k33_subdivisions(graph, must_contain=None, limit=100000):
+    """All K_3,3 subdivisions of `graph` (OGDF/SageMath only report a few), as nx graphs.
+    Each biconnected component is reduced to its topological core (chains of degree-2 nodes become single
+    edges); a K_3,3 subdivision is what is left after deleting cyclomatic-4 core edges and pruning.
+    `must_contain` (iterable of node pairs) keeps only subdivisions containing all those edges."""
+    from itertools import combinations
+    required = {frozenset(e) for e in (must_contain or ())}
+    results, unique = [], set()
+    for block in nx.biconnected_components(graph):
+        if len(block) < 6:
+            continue
+        H = graph.subgraph(block)
+        branch = {n for n in H if H.degree(n) >= 3}
+        if len(branch) < 6:
+            continue
+        chains, seen = [], set()
+        for b in branch:
+            for nb in H.neighbors(b):
+                if frozenset((b, nb)) in seen:
+                    continue
+                path, prev, cur = [b, nb], b, nb
+                while cur not in branch:
+                    nxt = [x for x in H.neighbors(cur) if x != prev][0]
+                    path.append(nxt)
+                    prev, cur = cur, nxt
+                for a, c in zip(path, path[1:]):
+                    seen.add(frozenset((a, c)))
+                chains.append((path[0], path[-1], path))
+        if len(chains) - len(branch) + 1 < 4:
+            continue
+        # a chain that holds a required edge can never be deleted
+        keep = [i for i, (_, _, path) in enumerate(chains)
+                if any(frozenset(e) in required for e in zip(path, path[1:]))]
+        deletable = [i for i in range(len(chains)) if i not in keep]
+        r = len(chains) - len(branch) + 1 - 4
+        for removed in combinations(deletable, r):
+            gone = set(removed)
+            core = nx.MultiGraph()
+            for i, (u, v, _) in enumerate(chains):
+                if i not in gone:
+                    core.add_edge(u, v, key=i)
+            leaves = [n for n in core if core.degree(n) <= 1]
+            while leaves:
+                core.remove_nodes_from(leaves)
+                leaves = [n for n in core if core.degree(n) <= 1]
+            degrees = dict(core.degree())
+            if (not core or max(degrees.values()) > 3 or sum(1 for d in degrees.values() if d == 3) != 6
+                    or not nx.is_connected(core)):
+                continue
+            # chains were cut at the original branch nodes, so degree-2 ones need suppressing
+            sg = nx.Graph()
+            for _, _, key in core.edges(keys=True):
+                sg.add_edges_from(zip(chains[key][2], chains[key][2][1:]))
+            hubs = [n for n in sg if sg.degree(n) == 3]
+            simple = nx.Graph()
+            for h in hubs:
+                for nb in sg.neighbors(h):
+                    prev, cur = h, nb
+                    while sg.degree(cur) == 2:
+                        nxt = [x for x in sg.neighbors(cur) if x != prev][0]
+                        prev, cur = cur, nxt
+                    simple.add_edge(h, cur)
+            if (simple.number_of_nodes() != 6 or simple.number_of_edges() != 9
+                    or not nx.is_isomorphic(simple, nx.complete_bipartite_graph(3, 3))):
+                continue
+            key = frozenset(frozenset(e) for e in sg.edges())
+            if key in unique:
+                continue
+            unique.add(key)
+            sg.graph['kind'] = 'K_3,3'
+            results.append(sg)
+            if len(results) >= limit:
+                return results
+    return results
+
+
+def find_knotted_k33_subgraphs(graph, node_pos_3d=None, params=None, limit=100):
+    """K_3,3 subdivisions that contain a knotted loop of `graph`, smallest first (at most `limit`).
+    OGDF/SageMath report only a few subdivisions, which can all be unknotted, so these are enumerated
+    from the knotted loops: a subdivision is knotted when one of its cycles is."""
+    found = {}
+    for lp in find_knotted_loops(graph, node_pos_3d, params=params):
+        for sg in enumerate_k33_subdivisions(graph, must_contain=loop_edges(lp['nodes'])):
+            key = frozenset(frozenset(e) for e in sg.edges())
+            if key not in found:
+                sg.graph['kind'] = 'K_3,3'
+                sg.graph['sources'] = ['knotted loop']
+                found[key] = sg
+    return sorted(found.values(), key=lambda g: (g.number_of_nodes(), sorted(map(str, g.nodes()))))[:limit]
+
+
 def find_k33_subgraphs(graph):
     """All K_3,3 subdivisions found by OGDF and SageMath, merged and deduplicated by edge set.
     Each subgraph records in graph['sources'] which finder(s) reported it; a finder that fails is skipped."""
@@ -664,12 +755,14 @@ def find_k33_subgraphs(graph):
     return list(merged.values())
 
 
-def find_obstructions(graph, method="ogdf"):
+def find_obstructions(graph, method="ogdf", **kwargs):
     """Return the obstruction subgraphs of `graph` found by `method` ('ogdf', 'sage', 'k33' or 'k5')."""
     if method == "k33":
         return find_k33_subgraphs(graph)
     if method == "k5":
         return find_k5_minors(graph)
+    if method == "k33knot":
+        return find_knotted_k33_subgraphs(graph, **kwargs)
     if method == "sage":
         return find_multiple_kuratowski_subgraphs_sage(graph)
     return find_multiple_kuratowski_subgraphs_ogdf(graph)
@@ -804,13 +897,14 @@ _HOMFLY_LOCK = threading.Lock()
 
 def _homfly_call(conn, chain, tries):
     try:
-        conn.send(tp.homfly(chain, tries=tries, run_parallel=False))
+        conn.send(tp.homfly(chain, closure=tp.Closure.CLOSED, run_parallel=False))
     except Exception:
         conn.send(None)
     conn.close()
 
 
-def _isolated_homfly(chain, tries):
+def _isolated_homfly(chain, tries=None):
+    # Loops are closed curves, so `tries` (random closure) is unused: closure=Closure.CLOSED.
     """Run tp.homfly in a fresh interpreter so a liblmpoly abort() only loses this chain.
     A subprocess (not fork) is used because forking this multithreaded process from several
     threads yields children with a corrupted heap ("malloc(): corrupted top size") or deadlocks."""
@@ -896,10 +990,13 @@ def classify_homfly(res, max_unknot=0.5, min_knot=0.48):
 KNOT_CACHE_DIR = os.environ.get('KNOT_CACHE_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'knot_cache'))
 
 
-def _knot_cache_path(graph, node_pos_3d, tries, kind=''):
-    """Cache file path keyed by a hash of the graph's edges, node coordinates and HOMFLY tries."""
+def _knot_cache_path(graph, node_pos_3d, tries, kind='', params=None):
+    """Cache file path: <pdbid>_<source>_<within>_<subgraph index>_<nodes>n_<hash>.json.
+    The hash covers the graph's edges, node coordinates and the HOMFLY settings, so graphs that
+    differ only in e.g. simplification still get distinct files."""
     import hashlib
-    h = hashlib.sha256(f'v2-chiral|{tries}|{kind}'.encode())
+    params = params or {}
+    h = hashlib.sha256(f'v4-closed|{tries}|{kind}'.encode())
     for n in sorted(graph.nodes(), key=str):
         c = graph.nodes[n].get('coords')
         if c is None and node_pos_3d is not None:
@@ -907,32 +1004,52 @@ def _knot_cache_path(graph, node_pos_3d, tries, kind=''):
         h.update(f'{n}:{None if c is None else [round(float(x), 4) for x in c]};'.encode())
     for e in sorted(tuple(sorted((str(u), str(v)))) for u, v in graph.edges()):
         h.update(f'{e};'.encode())
-    return os.path.join(KNOT_CACHE_DIR, h.hexdigest() + '.json')
+    within = params.get('within') or kind or 'whole'
+    if params.get('simplified'):
+        within += '-simplified'
+    index = params.get('subgraph_index')
+    parts = [params.get('pdbid') or 'unknown', params.get('source') or 'unknown', within,
+             '-' if index is None else str(index), f'{graph.number_of_nodes()}n', h.hexdigest()[:12]]
+    name = '_'.join(re.sub(r'[^A-Za-z0-9.,+-]', '-', str(x)) for x in parts)
+    return os.path.join(KNOT_CACHE_DIR, name + '.json')
+
+
+def loop_edges(nodes):
+    """Edge set (frozensets) of the cycle through `nodes`, ignoring a repeated closing node."""
+    nodes = list(nodes)
+    if len(nodes) > 1 and nodes[0] == nodes[-1]:
+        nodes = nodes[:-1]
+    return {frozenset((nodes[i], nodes[(i + 1) % len(nodes)])) for i in range(len(nodes))}
 
 
 def find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, params=None):
     """Cached wrapper around _find_knotted_loops; results are stored as JSON files in KNOT_CACHE_DIR
-    together with the `params` (PDB ID, source, reduction, numbering, ...) they were computed for."""
+    together with the `params` (PDB ID, source, reduction, numbering, ...) they were computed for, the
+    nodes of the analyzed graph and every loop that was analyzed, also those without a knot."""
     import json
-    path = _knot_cache_path(graph, node_pos_3d, tries)
+    path = _knot_cache_path(graph, node_pos_3d, tries, params=params)
     by_str = {str(n): n for n in graph.nodes()}
     try:
         with open(path) as f:
             data = json.load(f)
-        loops = data['loops'] if isinstance(data, dict) else data
+        loops = data['loops']
         for lp in loops:
             lp['nodes'] = [by_str[n] for n in lp['nodes']]
         return loops
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, TypeError):
         pass
-    loops = _find_knotted_loops(graph, node_pos_3d, tries, workers)
+    analyzed = []
+    loops = _find_knotted_loops(graph, node_pos_3d, tries, workers, analyzed=analyzed)
     try:
         os.makedirs(KNOT_CACHE_DIR, exist_ok=True)
         tmp = f'{path}.{os.getpid()}.tmp'
         with open(tmp, 'w') as f:
             json.dump(dict(params=dict(params or {}, tries=tries, nodes=graph.number_of_nodes(),
                                        edges=graph.number_of_edges()),
-                           loops=[{**lp, 'nodes': [str(n) for n in lp['nodes']]} for lp in loops]), f, indent=1)
+                           nodes=[str(n) for n in graph.nodes()],
+                           loops=[{**lp, 'nodes': [str(n) for n in lp['nodes']]} for lp in loops],
+                           loops_analyzed=[{**a, 'nodes': [str(n) for n in a['nodes']]} for a in analyzed]),
+                      f, indent=1)
         os.replace(tmp, path)
     except OSError:
         logging.warning('Could not write knot cache %s', path)
@@ -942,7 +1059,7 @@ def find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, params=
 def cached_subgraph_homfly(subgraph, node_pos_3d=None, tries=500, params=None):
     """File-cached test_obstruction_knot_homfly; failed/timed-out runs (knot_type None) are not cached."""
     import json
-    path = _knot_cache_path(subgraph, node_pos_3d, tries, kind='subgraph')
+    path = _knot_cache_path(subgraph, node_pos_3d, tries, kind='subgraph', params=params)
     try:
         with open(path) as f:
             data = json.load(f)
@@ -957,6 +1074,7 @@ def cached_subgraph_homfly(subgraph, node_pos_3d=None, tries=500, params=None):
             with open(tmp, 'w') as f:
                 json.dump(dict(params=dict(params or {}, tries=tries, nodes=subgraph.number_of_nodes(),
                                            edges=subgraph.number_of_edges()),
+                               nodes=[str(n) for n in subgraph.nodes()],
                                knot_type=knot_type, prob=prob), f, indent=1)
             os.replace(tmp, path)
         except OSError:
@@ -964,7 +1082,7 @@ def cached_subgraph_homfly(subgraph, node_pos_3d=None, tries=500, params=None):
     return knot_type, prob
 
 
-def _find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None):
+def _find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, analyzed=None):
     """Enumerate loops of `graph` with Topoly and return those that HOMFLY classifies as knotted,
     as dicts with the loop's node sequence, knot type and probabilities (most probable first)."""
     from concurrent.futures import ThreadPoolExecutor
@@ -987,6 +1105,8 @@ def _find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None):
     seen, unique = set(), []
     for text in loops:
         ids, coords = _parse_nxyz_loop(text)
+        if len(ids) > 1 and ids[0] == ids[-1]:
+            ids, coords = ids[:-1], coords[:-1]
         if len(ids) < 3:
             continue
         key = frozenset(frozenset((ids[i], ids[(i + 1) % len(ids)])) for i in range(len(ids)))
@@ -996,10 +1116,14 @@ def _find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None):
 
     def evaluate(item):
         ids, coords = item
-        verdict = classify_homfly(_isolated_homfly(coords, tries))
+        res = _isolated_homfly(coords, tries)
+        loop_nodes = [id_to_node[i] for i in ids]
+        verdict = classify_homfly(res)
+        if analyzed is not None:
+            analyzed.append(dict(nodes=loop_nodes, homfly=res, knotted=verdict is not None))
         if verdict is None:
             return None
-        return dict(nodes=[id_to_node[i] for i in ids], knot=verdict[0], prob=verdict[1], unknot_prob=verdict[2])
+        return dict(nodes=loop_nodes, knot=verdict[0], prob=verdict[1], unknot_prob=verdict[2])
 
     with ThreadPoolExecutor(max_workers=workers or min(8, os.cpu_count() or 1)) as pool:
         found = [r for r in pool.map(evaluate, unique) if r is not None]
@@ -1191,12 +1315,12 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     # Mutable server-side state so the pdbid/source-switch callback can swap in a
     # new graph without redeclaring every other callback (Dash apps here are single-user).
     state={}
-    def compute_obstructions(g,pos,method):
+    def compute_obstructions(g,pos,method,**kwargs):
         planar,obs=nx.check_planarity(g,counterexample=True)
         multi_subgraphs=[]
         if not planar:
-            multi_subgraphs=find_obstructions(g,method)
-            if method in ("sage","k5","k33") and multi_subgraphs:
+            multi_subgraphs=find_obstructions(g,method,**kwargs)
+            if method in ("sage","k5","k33","k33knot") and multi_subgraphs:
                 obs=multi_subgraphs[0]
         return dict(planar=planar,obs=obs,
                     obs_nodes=set(obs.nodes()) if not planar else set(),
@@ -1282,6 +1406,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Div([
             html.Button("K_3,3",id="find-k33-btn",n_clicks=0,style=BTN_PRIMARY),
             html.Button("K_5 minor",id="find-k5-btn",n_clicks=0,style=BTN_PRIMARY),
+            html.Button("Knotted K_3,3",id="find-k33knot-btn",n_clicks=0,style=BTN_PRIMARY,
+                        title="K_3,3 subdivisions containing a knotted loop (may take a while)"),
             html.Span(id="find-message",style={"fontSize":"12px","color":"crimson"}),
         ],style=ROW),
         ],style=ROW),
@@ -1470,8 +1596,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         """For each loop record, per finder, which obstruction subgraphs equal it or contain all its edges."""
         obs=all_obstructions(graph)
         for lp in loops:
-            nodes=lp['nodes']
-            edges={frozenset((nodes[i],nodes[(i+1)%len(nodes)])) for i in range(len(nodes))}
+            edges=loop_edges(lp['nodes'])
             res={}
             for key,_ in OBSTRUCTION_FINDERS:
                 subs=obs[key]
@@ -1553,17 +1678,17 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if not loops:
             return None
         nodes=loops[idx%len(loops)]['nodes']
-        edges={frozenset((nodes[i],nodes[(i+1)%len(nodes)])) for i in range(len(nodes))}
+        edges=loop_edges(nodes)
         edges={e for e in edges if len(e)==2 and state['G'].has_edge(*e)}
         return set(nodes),edges
 
-    FAMILY_LABELS={"k33":"K_3,3","k5":"K_5 minor"}
+    FAMILY_LABELS={"k33":"K_3,3","k5":"K_5 minor","k33knot":"Knotted K_3,3"}
 
     @app.callback(Output("subgraph-info","children"),Input("subgraph-index","data"),Input("graph-version","data"))
     def update_info(idx,_version):
         method=state.get('obs_method')
         if method not in FAMILY_LABELS:
-            return "Click K_3,3 or K_5 minor."
+            return "Click K_3,3, K_5 minor or Knotted K_3,3."
         subgraphs=state['multi_subgraphs']
         n=len(subgraphs)
         name=FAMILY_LABELS[method]
@@ -1582,12 +1707,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     @app.callback(Output("graph-version","data",allow_duplicate=True),Output("subgraph-index","data",allow_duplicate=True),
     Output("mode","value",allow_duplicate=True),Output("selected-obstruction-only","value",allow_duplicate=True),
     Output("find-message","children"),
-    Input("find-k33-btn","n_clicks"),Input("find-k5-btn","n_clicks"),State("graph-version","data"),
-    prevent_initial_call=True)
-    def find_family(_k33,_k5,version):
-        method="k33" if ctx.triggered_id=="find-k33-btn" else "k5"
+    Input("find-k33-btn","n_clicks"),Input("find-k5-btn","n_clicks"),Input("find-k33knot-btn","n_clicks"),
+    State("graph-version","data"),prevent_initial_call=True)
+    def find_family(_k33,_k5,_k33knot,version):
+        method={"find-k33-btn":"k33","find-k33knot-btn":"k33knot"}.get(ctx.triggered_id,"k5")
+        extra=dict(node_pos_3d=state.get('node_pos_3d'),params=dict(state.get('graph_params',{}))) if method=="k33knot" else {}
         try:
-            res=compute_obstructions(state['G'],state['pos'],method)
+            res=compute_obstructions(state['G'],state['pos'],method,**extra)
         except Exception as e:
             return no_update,no_update,no_update,no_update,f"{FAMILY_LABELS[method]} search failed: {e}"
         state.update(res,obs_method=method,within_cache={},within_job=None)
@@ -1655,7 +1781,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if not w or not w['loops']:
             return None
         nodes=w['loops'][widx%len(w['loops'])]['nodes']
-        edges={frozenset((nodes[i],nodes[(i+1)%len(nodes)])) for i in range(len(nodes))}
+        edges=loop_edges(nodes)
         return set(nodes),edges
 
     def within_status(idx,simplified,method,widx):

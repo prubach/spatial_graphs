@@ -88,3 +88,26 @@ I fixed the dangling edges in the K_5 models. I couldn't reproduce the 1A8E resu
 - To get the knot type of the K_5 itself, use "Run HOMFLY" or "Test knot (HOMFLY 500)", which test the obstruction shown.
 
 The changes are in `dash_graphs.py`. I didn't run the full app UI after them.
+
+
+## Problem finding knotted K₃,₃ subdivisions in 1AOC, 1AOZ and 1ASO
+
+I'll start with the current cache and loop-finding code.
+
+I found why no knotted K₃,₃ showed up and added a "Knotted K_3,3" finder to the Find panel. On 1AOC it now lists 11 K₃,₃ subdivisions that contain the knotted loop, and "Knot within" shows `+3_1` for the first. I tested that through the app on 1AOC only. For 1AOZ and 1ASO I only counted the knotted K₃,₃ subdivisions by script (the 80–204 per knotted loop in the last two bullets); I didn't run the new button on them.
+
+- **Why they weren't found:** OGDF and SageMath report only a handful of K₃,₃ subdivisions (13 in 1AOC), and none of those contained a knotted cycle. The graphs actually contain far more, for example about 200 distinct ones in 1AOC.
+  - The new "Knotted K_3,3" button enumerates all subdivisions that contain a knotted loop of the whole graph and lists up to 100, smallest first.
+  - It first runs the whole-graph knotted-loop search, which took about 30 s on 1AOC.
+  - In 1AOZ and 1ASO, each knotted loop lies in 29–204 K₃,₃ subdivisions.
+- **Second bug:** Topoly's `find_loops` returns a loop whose first node is repeated at the end. That made 1AOC's knotted loop appear as 28 nodes instead of 27, and it broke the "contained in" check in the Knotted loops panel. Loops are now stripped of the repeated node.
+- **Bonds:** `find_loops` has no notion of bond types. It sees whatever edges we pass, and the app passes all of them (CA, disulfide and side-chain edges).
+  - I checked completeness against networkx: Topoly found all 186 cycles in 1AOC, and I didn't finish the comparison for 1AOZ and 1ASO.
+  - Within the 13 K₃,₃ subdivisions the finders report for 1AOC, all 15 cycles of each came out unknotted, with HOMFLY CLOSED and the earlier `tries`-based closure not involved.
+- **Cache:**
+  - Files are now named `<pdbid>_<source>_<within>_<subgraph index>_<nodes>n_<hash>.json`, for example `1AOC_simplified_k33knot_0_27n_….json`. I added a short hash because simplification and numbering settings would otherwise collide.
+  - Each file now stores the analyzed subgraph's nodes. For the knotted-loop searches it also stores `loops_analyzed`, which holds every analyzed loop with its HOMFLY result, unknots included.
+  - The whole-subgraph "Run HOMFLY" cache stores the nodes but no loop list.
+  - I deleted the old hash-named files, since the cache version changed.
+
+I added the new finder to `README.md` and a short note on the cache format. The code changes are in `dash_graphs.py`.
