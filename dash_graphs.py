@@ -63,7 +63,7 @@ def build_elements(graph,pos,obs_nodes=set(),obs_edges=set(),highlight=False,cls
     return els
 
 
-EDGE_2D_SCALE = 2  # 2D edges are drawn this much thicker than the base width to resemble the 3D view
+EDGE_2D_SCALE = 10  # 2D edges are drawn this much thicker than the base width to resemble the 3D view
 
 
 def _crossing_overlay_elements(elements, node_pos_3d, edge_thickness=1.0, edge_colors=None):
@@ -156,9 +156,18 @@ def _crossing_overlay_elements(elements, node_pos_3d, edge_thickness=1.0, edge_c
     return markers
 
 
+def node_scale_for(thickness):
+    """2D node circle/label scale: grows with the thickness slider, but more slowly than the edges."""
+    return max(thickness, 0.1) ** 0.5
+
+
 def edge_thickness_stylesheet(thickness):
-    """Return Cytoscape edge widths scaled consistently with the 3D thickness control."""
+    """Return Cytoscape edge widths and node sizes scaled consistently with the 3D thickness control."""
+    node_scale = node_scale_for(thickness)
     return [
+        {"selector": "node", "style": {"width": 60 * node_scale, "height": 60 * node_scale}},
+        {"selector": "node.obstruction", "style": {"width": 60 * node_scale, "height": 60 * node_scale}},
+        {"selector": "node.knotted", "style": {"width": 60 * node_scale, "height": 60 * node_scale}},
         {"selector": "edge", "style": {"width": 5 * EDGE_2D_SCALE * thickness}},
         {"selector": "edge.obstruction", "style": {"width": 16 * EDGE_2D_SCALE * thickness}},
         {"selector": "edge.knotted", "style": {"width": 16 * EDGE_2D_SCALE * thickness}},
@@ -1468,6 +1477,11 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Label("View",style=LABEL),
         dcc.RadioItems(id="view-dim",inline=True,value="3d",options=[
         {"label":"2D","value":"2d"},{"label":"3D","value":"3d"}],labelStyle=OPT),
+        html.Span([html.Button(t,id=i,n_clicks=0,title=h,style={**BTN,"padding":"0 6px"}) for t,i,h in [
+            ("◀","rot-left","Turn left (2D)"),("▶","rot-right","Turn right (2D)"),
+            ("▲","rot-up","Tilt up (2D)"),("▼","rot-down","Tilt down (2D)"),
+            ("⟲","rot-ccw","Rotate counter-clockwise (2D)"),("⟳","rot-cw","Rotate clockwise (2D)"),
+            ("Reset","rot-reset","Reset 2D orientation")]],style={"display":"inline-flex","gap":"2px"}),
         dcc.Checklist(id="show-grid",options=[{"label":"Show grid","value":"grid"}],value=["grid"],labelStyle=OPT),
         html.Button("3D to HTML",id="export-3d-btn",n_clicks=0,title="Export 3D view to HTML",
                     style={**BTN,"whiteSpace":"nowrap"}),
@@ -1492,6 +1506,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     ],style={"display":"flex","flexWrap":"nowrap","gap":"6px","alignItems":"stretch","marginTop":"2px"}),
     html.Div(id="edge-color-legend",style={"margin":"2px 0"}),
     dcc.Store(id="graph-version",data=0),
+    dcc.Store(id="rot3d",data=[0,0,0]),
     dcc.Store(id="subgraph-index",data=0),
     dcc.Store(id="knot-index",data=0),
     dcc.Store(id="knot-version",data=0),
@@ -1859,7 +1874,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         rainbow_rules=[{"selector":f'edge[source = "{u}"][target = "{v}"]',"style":{"line-color":c}}
                        for (u,v),c in ((tuple(e),c) for e,c in rainbow_backbone_map(g).items())] if rainbow else []
         rainbow_rules+=[{"selector":f'edge[source = "{v}"][target = "{u}"]',"style":r["style"]} for r in rainbow_rules for u,v in [(r["selector"].split('"')[3],r["selector"].split('"')[1])]]
-        stylesheet=BASE_STYLE+[{"selector":"node","style":{"font-size":f"{font_size or 18}px"}},
+        stylesheet=BASE_STYLE+[{"selector":"node","style":{"font-size":f"{(font_size or 18)*node_scale_for(thickness):.1f}px"}},
             {"selector":".crossing-marker","style":{"width":24*EDGE_2D_SCALE,"height":24*EDGE_2D_SCALE,"shape":"rectangle",
              "background-opacity":0,"background-image":"data(image)","background-fit":"contain",
              "border-width":0}}]+edge_color_stylesheet(g,attr)+rainbow_rules+OBSTRUCTION_STYLE+KNOT_STYLE
@@ -1870,19 +1885,49 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                                     style={"fontSize":"12px","color":"#607d8b","marginLeft":"12px"}))
         return stylesheet,html.Div(legend)
 
+    ROT_STEP=15
+    ROT_BUTTONS={"rot-left":(0,-1),"rot-right":(0,1),"rot-up":(1,-1),"rot-down":(1,1),"rot-ccw":(2,-1),"rot-cw":(2,1)}
+
+    @app.callback(Output("rot3d","data"),*[Input(i,"n_clicks") for i in [*ROT_BUTTONS,"rot-reset"]],
+    State("rot3d","data"),prevent_initial_call=True)
+    def rotate_view(*args):
+        rot=list(args[-1] or [0,0,0])
+        trig=ctx.triggered_id
+        if trig=="rot-reset":
+            return [0,0,0]
+        axis,sign=ROT_BUTTONS[trig]
+        rot[axis]=(rot[axis]+sign*ROT_STEP)%360
+        return rot
+
+    def rotated_positions(rot):
+        """Rotate the 3D coordinates about their centroid (yaw, pitch, roll in degrees); returns (2D positions, 3D coordinates)."""
+        coords=state['node_pos_3d']
+        if not rot or not any(rot):
+            return state['pos'],coords
+        pts=np.array([coords[n] for n in coords],dtype=float)
+        c=pts.mean(axis=0)
+        yaw,pitch,roll=(np.radians(a) for a in rot)
+        ry=np.array([[np.cos(yaw),0,np.sin(yaw)],[0,1,0],[-np.sin(yaw),0,np.cos(yaw)]])
+        rx=np.array([[1,0,0],[0,np.cos(pitch),-np.sin(pitch)],[0,np.sin(pitch),np.cos(pitch)]])
+        rz=np.array([[np.cos(roll),-np.sin(roll),0],[np.sin(roll),np.cos(roll),0],[0,0,1]])
+        out=(pts-c)@(rz@rx@ry).T+c
+        new3={n:tuple(out[i]) for i,n in enumerate(coords)}
+        return {n:(v[0],v[1]) for n,v in new3.items()},new3
+
     @app.callback(Output("graph","elements"),
     Input("mode","value"),Input("subgraph-index","data"),Input("graph-version","data"),
     Input("selected-obstruction-only","value"),Input("simplify-subgraph","value"),
     Input("knot-index","data"),Input("knot-version","data"),
     Input("view-dim","value"),Input("edge-thickness","value"),
     Input("rainbow-backbone","value"),Input("edge-color-attr","value"),
-    Input("within-index","data"),Input("within-version","data"),Input("knot-in-original","value"))
-    def update(mode,idx,_version,selected_obstruction_only,simplify_subgraph,knot_idx,_kv,view_dim,_thickness_index,rainbow,color_attr,widx,_wv,knot_in_full):
+    Input("within-index","data"),Input("within-version","data"),Input("knot-in-original","value"),Input("rot3d","data"))
+    def update(mode,idx,_version,selected_obstruction_only,simplify_subgraph,knot_idx,_kv,view_dim,_thickness_index,rainbow,color_attr,widx,_wv,knot_in_full,rot):
         g=state['G']
+        vpos,vpos3d=rotated_positions(rot) if view_dim=="2d" else (state['pos'],state['node_pos_3d'])
         def finalize(elements):
             if view_dim != "2d":
                 return elements
-            node_pos_3d={str(n): coordinates for n,coordinates in state['node_pos_3d'].items()}
+            node_pos_3d={str(n): coordinates for n,coordinates in vpos3d.items()}
             thickness=EDGE_THICKNESS_VALUES[_thickness_index] if _thickness_index is not None else 1.0
             colors={**edge_color_map(g,color_attr),**(rainbow_backbone_map(g) if rainbow else {})}
             colors={frozenset(map(str,e)):c for e,c in colors.items()}
@@ -1890,18 +1935,18 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if mode=="knots":
             sel=knotted_loop_selection(knot_idx)
             if sel is None:
-                return finalize(build_elements(g,state['pos']))
+                return finalize(build_elements(g,vpos))
             if "on" in (selected_obstruction_only or []):
-                return finalize(build_elements(g.edge_subgraph(tuple(e) for e in sel[1]),state['pos'],sel[0],sel[1],True,"knotted"))
-            return finalize(build_elements(g,state['pos'],sel[0],sel[1],True,"knotted"))
+                return finalize(build_elements(g.edge_subgraph(tuple(e) for e in sel[1]),vpos,sel[0],sel[1],True,"knotted"))
+            return finalize(build_elements(g,vpos,sel[0],sel[1],True,"knotted"))
         if mode=="original":
-            return finalize(build_elements(g,state['pos']))
+            return finalize(build_elements(g,vpos))
         if mode=="highlight":
-            return finalize(build_elements(g,state['pos'],state['obs_nodes'],state['obs_edges'],True))
+            return finalize(build_elements(g,vpos,state['obs_nodes'],state['obs_edges'],True))
         if mode=="multi":
             multi_subgraphs=state['multi_subgraphs']
             if not multi_subgraphs:
-                return finalize(build_elements(g,state['pos']))
+                return finalize(build_elements(g,vpos))
             sub=multi_subgraphs[idx]
             sub_nodes=set(sub.nodes())
             sub_edges={frozenset(e) for e in sub.edges()}
@@ -1911,12 +1956,12 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                 knot=within_selection(idx,simplified,"kmt",widx or 0) or (set(),set())
                 if simplified:
                     simp_g=get_simplified_subgraph(idx,selected_graph,method="kmt")
-                    return finalize(build_elements(simp_g,state['pos'],set(simp_g.nodes()),{frozenset(e) for e in simp_g.edges()},True,
+                    return finalize(build_elements(simp_g,vpos,set(simp_g.nodes()),{frozenset(e) for e in simp_g.edges()},True,
                                                    knot_nodes=knot[0],knot_edges=knot[1]))
-                return finalize(build_elements(selected_graph,state['pos'],sub_nodes,sub_edges,True,
+                return finalize(build_elements(selected_graph,vpos,sub_nodes,sub_edges,True,
                                                knot_nodes=knot[0],knot_edges=knot[1]))
             knot=full_graph_knot(idx,widx,knot_in_full)
-            return finalize(build_elements(g,state['pos'],sub_nodes,sub_edges,True,knot_nodes=knot[0],knot_edges=knot[1]))
+            return finalize(build_elements(g,vpos,sub_nodes,sub_edges,True,knot_nodes=knot[0],knot_edges=knot[1]))
         return finalize(build_elements(state['obs'],state['obs_pos']))
 
     @app.callback(Output("graph","style"),Output("graph-3d","style"),
