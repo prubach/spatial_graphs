@@ -66,3 +66,5 @@ In the 2D view edges are drawn thick (adjustable with the thickness slider) and 
 In 2D the thickness slider also scales node circles and labels (square root of the edge factor), and the ◀ ▶ ▲ ▼ ⟲ ⟳ buttons next to "View" turn the whole graph in 15° steps (crossings are recomputed); "Reset" restores the original orientation.
 
 "Subgraph file" (Appearance panel) downloads the currently displayed (sub)graph as JSON: parameters, nodes with coordinates, edges, highlighted edges and, when available, the matching `knot_cache` data (`loops`, `loops_analyzed`).
+
+Long knot searches print progress to the console (loops enumerated, HOMFLY loops analyzed, K_3,3 enumeration). Loops are enumerated with `networkx.simple_cycles` (much faster than Topoly's `find_loops`). Partial results are written to `<cache file>.partial.json` every 30 s and reused after an interrupted run; the "Knotted K_3,3" search also stores its per-loop results in a `..._k33knot_...json` cache file.

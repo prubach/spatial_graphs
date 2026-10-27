@@ -660,7 +660,9 @@ def enumerate_k33_subdivisions(graph, must_contain=None, limit=100000):
     Each biconnected component is reduced to its topological core (chains of degree-2 nodes become single
     edges); a K_3,3 subdivision is what is left after deleting cyclomatic-4 core edges and pruning.
     `must_contain` (iterable of node pairs) keeps only subdivisions containing all those edges."""
+    import time
     from itertools import combinations
+    from math import comb
     required = {frozenset(e) for e in (must_contain or ())}
     results, unique = [], set()
     for block in nx.biconnected_components(graph):
@@ -690,7 +692,14 @@ def enumerate_k33_subdivisions(graph, must_contain=None, limit=100000):
                 if any(frozenset(e) in required for e in zip(path, path[1:]))]
         deletable = [i for i in range(len(chains)) if i not in keep]
         r = len(chains) - len(branch) + 1 - 4
-        for removed in combinations(deletable, r):
+        total = comb(len(deletable), r)
+        if total > 100000:
+            _log(f'  K_3,3 enumeration: {total} edge-removal combinations in a block of {len(block)} nodes')
+        last_log = time.time()
+        for n_done, removed in enumerate(combinations(deletable, r)):
+            if total > 100000 and time.time() - last_log > 10:
+                last_log = time.time()
+                _log(f'  K_3,3 enumeration: {n_done}/{total} combinations ({len(results)} found)')
             gone = set(removed)
             core = nx.MultiGraph()
             for i, (u, v, _) in enumerate(chains):
@@ -736,13 +745,29 @@ def find_knotted_k33_subgraphs(graph, node_pos_3d=None, params=None, limit=100):
     OGDF/SageMath report only a few subdivisions, which can all be unknotted, so these are enumerated
     from the knotted loops: a subdivision is knotted when one of its cycles is."""
     found = {}
-    for lp in find_knotted_loops(graph, node_pos_3d, params=params):
-        for sg in enumerate_k33_subdivisions(graph, must_contain=loop_edges(lp['nodes'])):
-            key = frozenset(frozenset(e) for e in sg.edges())
-            if key not in found:
+    loops = find_knotted_loops(graph, node_pos_3d, params=params)
+    _log(f'Knotted K_3,3 search: {len(loops)} knotted loops to expand')
+    # per-loop results are stored so an interrupted search resumes where it stopped
+    path = _knot_cache_path(graph, node_pos_3d, 500, kind='k33knot', params=params)
+    stored = (_read_json(path) or {}).get('loops', {})
+    by_str = {str(n): n for n in graph.nodes()}
+    for i, lp in enumerate(loops):
+        key = ','.join(sorted(str(n) for n in lp['nodes']))
+        if key in stored:
+            subs = [nx.Graph([(by_str[u], by_str[v]) for u, v in edges]) for edges in stored[key]]
+            for sg in subs:
+                sg.graph['kind'] = 'K_3,3'
+        else:
+            subs = enumerate_k33_subdivisions(graph, must_contain=loop_edges(lp['nodes']))
+            stored[key] = [[[str(u), str(v)] for u, v in sg.edges()] for sg in subs]
+            _write_json(path, dict(params=dict(params or {}, kind='k33knot'), loops=stored))
+        _log(f'Knotted K_3,3 search: loop {i + 1}/{len(loops)} ({len(lp["nodes"])} nodes) -> {len(subs)} K_3,3 subdivisions')
+        for sg in subs:
+            ek = frozenset(frozenset(e) for e in sg.edges())
+            if ek not in found:
                 sg.graph['kind'] = 'K_3,3'
                 sg.graph['sources'] = ['knotted loop']
-                found[key] = sg
+                found[ek] = sg
     return sorted(found.values(), key=lambda g: (g.number_of_nodes(), sorted(map(str, g.nodes()))))[:limit]
 
 
@@ -1049,6 +1074,33 @@ def _knot_cache_path(graph, node_pos_3d, tries, kind='', params=None):
     return os.path.join(KNOT_CACHE_DIR, parts[0], '_'.join(parts) + '.json')
 
 
+def _log(msg):
+    """Progress line on the console (long searches otherwise look hung)."""
+    import time
+    print(f'[{time.strftime("%H:%M:%S")}] {msg}', flush=True)
+
+
+def _read_json(path):
+    import json
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _write_json(path, data):
+    import json
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f'{path}.{os.getpid()}.{threading.get_ident()}.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(data, f, indent=1)
+        os.replace(tmp, path)
+    except OSError:
+        logging.warning('Could not write cache %s', path)
+
+
 def loop_edges(nodes):
     """Edge set (frozensets) of the cycle through `nodes`, ignoring a repeated closing node."""
     nodes = list(nodes)
@@ -1074,7 +1126,8 @@ def find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, params=
     except (OSError, ValueError, KeyError, TypeError):
         pass
     analyzed = []
-    loops = _find_knotted_loops(graph, node_pos_3d, tries, workers, analyzed=analyzed)
+    loops = _find_knotted_loops(graph, node_pos_3d, tries, workers, analyzed=analyzed,
+                                partial_path=path[:-len('.json')] + '.partial.json')
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = f'{path}.{os.getpid()}.tmp'
@@ -1086,6 +1139,10 @@ def find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, params=
                            loops_analyzed=[{**a, 'nodes': [str(n) for n in a['nodes']]} for a in analyzed]),
                       f, indent=1)
         os.replace(tmp, path)
+        try:
+            os.remove(path[:-len('.json')] + '.partial.json')
+        except OSError:
+            pass
     except OSError:
         logging.warning('Could not write knot cache %s', path)
     return loops
@@ -1117,7 +1174,14 @@ def cached_subgraph_homfly(subgraph, node_pos_3d=None, tries=500, params=None):
     return knot_type, prob
 
 
-def _find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, analyzed=None):
+def _node_coords(graph, n, node_pos_3d):
+    c = graph.nodes[n].get('coords')
+    if c is None and node_pos_3d is not None:
+        c = node_pos_3d.get(n)
+    return [float(x) for x in c] if c is not None else (0.0, 0.0, 0.0)
+
+
+def _find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, analyzed=None, partial_path=None):
     """Enumerate loops of `graph` with Topoly and return those that HOMFLY classifies as knotted,
     as dicts with the loop's node sequence, knot type and probabilities (most probable first)."""
     from concurrent.futures import ThreadPoolExecutor
@@ -1135,33 +1199,66 @@ def _find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, analyz
         arcs.append(arc)
     if not arcs:
         return []
-    loops = list(tp.Graph(arcs).find_loops(output_type=OutputType.NXYZ, arc_bridges=0))
+    import time
+    t0 = time.time()
+    partial = (_read_json(partial_path) or {}) if partial_path else {}
+    _log(f'Enumerating loops of a graph with {len(nodes)} nodes and {len(arcs)} edges '
+         f'(exponential in the number of independent cycles; counts are logged every 10s)...')
+    # every simple cycle once; same set as Topoly's find_loops, which is far slower on larger graphs
+    index = {n: i for i, n in enumerate(nodes)}
+    unique, last = [], time.time()
+    for cycle in nx.simple_cycles(nx.Graph(graph.edges())):
+        if len(cycle) >= 3:
+            ids = [index[n] for n in cycle]
+            unique.append((ids, [list(_node_coords(graph, n, node_pos_3d)) for n in cycle]))
+        if time.time() - last > 10:
+            last = time.time()
+            _log(f'  {len(unique)} loops enumerated so far ({last - t0:.0f}s)')
+    _log(f'Found {len(unique)} loops in {time.time() - t0:.0f}s')
 
-    seen, unique = set(), []
-    for text in loops:
-        ids, coords = _parse_nxyz_loop(text)
-        if len(ids) > 1 and ids[0] == ids[-1]:
-            ids, coords = ids[:-1], coords[:-1]
-        if len(ids) < 3:
-            continue
-        key = frozenset(frozenset((ids[i], ids[(i + 1) % len(ids)])) for i in range(len(ids)))
-        if key not in seen:
-            seen.add(key)
-            unique.append((ids, coords))
+    def loop_key(names):
+        return frozenset(frozenset((names[i], names[(i + 1) % len(names)])) for i in range(len(names)))
+
+    # HOMFLY results of an earlier, interrupted run are reused
+    entries = list(partial.get('analyzed', []))
+    done = {loop_key(a['nodes']): a['homfly'] for a in entries}
+    if done:
+        _log(f'Resuming: {len(done)} loops already analyzed in {os.path.basename(partial_path)}')
+    lock = threading.Lock()
+    progress = dict(count=0, last_save=time.time(), last_log=0.0)
+    total = len(unique)
 
     def evaluate(item):
         ids, coords = item
-        res = _isolated_homfly(coords, tries)
+        names = [str(id_to_node[i]) for i in ids]
+        key = loop_key(names)
+        cached = key in done
+        res = done[key] if cached else _isolated_homfly(coords, tries)
         loop_nodes = [id_to_node[i] for i in ids]
         verdict = classify_homfly(res)
-        if analyzed is not None:
-            analyzed.append(dict(nodes=loop_nodes, homfly=res, knotted=verdict is not None))
+        with lock:
+            if analyzed is not None:
+                analyzed.append(dict(nodes=loop_nodes, homfly=res, knotted=verdict is not None))
+            if not cached:
+                entries.append(dict(nodes=names, homfly=res))
+            progress['count'] += 1
+            now = time.time()
+            if now - progress['last_log'] > 10 or progress['count'] == total:
+                progress['last_log'] = now
+                _log(f'HOMFLY: {progress["count"]}/{total} loops analyzed ({now - t0:.0f}s elapsed)')
+            if partial_path and now - progress['last_save'] > 30:
+                progress['last_save'] = now
+                _write_json(partial_path, dict(analyzed=entries))
         if verdict is None:
             return None
         return dict(nodes=loop_nodes, knot=verdict[0], prob=verdict[1], unknot_prob=verdict[2])
 
     with ThreadPoolExecutor(max_workers=workers or min(8, os.cpu_count() or 1)) as pool:
         found = [r for r in pool.map(evaluate, unique) if r is not None]
+    if partial_path:
+        with lock:
+            _write_json(partial_path, dict(analyzed=entries))
+    _log(f'Loop analysis finished: {len(found)} knotted of {total} loops')
     return sorted(found, key=lambda r: -r['prob'])
 
 
