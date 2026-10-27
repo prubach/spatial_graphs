@@ -1506,6 +1506,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Button("3D to HTML",id="export-3d-btn",n_clicks=0,title="Export 3D view to HTML",
                     style={**BTN,"whiteSpace":"nowrap"}),
         dcc.Download(id="export-3d-download"),
+        html.Button("Subgraph file",id="export-sub-btn",n_clicks=0,title="Download the displayed (sub)graph as JSON, with its knot-cache data if available",
+                    style={**BTN,"whiteSpace":"nowrap"}),
+        dcc.Download(id="export-sub-download"),
         ],style=ROW),
         html.Div([
         html.Label("Color edges by",style=LABEL),
@@ -1991,6 +1994,60 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if view=="3d":
             return container_style(True,grid),container_style(False,grid)
         return container_style(False,grid),container_style(True,grid)
+
+    @app.callback(Output("export-sub-download","data"),Input("export-sub-btn","n_clicks"),
+    State("mode","value"),State("subgraph-index","data"),State("selected-obstruction-only","value"),
+    State("simplify-subgraph","value"),State("knot-index","data"),State("within-index","data"),
+    prevent_initial_call=True)
+    def export_subgraph(_n,mode,idx,selected_only,simplify_val,knot_idx,widx):
+        import json
+        g=state['G']
+        params=dict(state.get('graph_params',{}))
+        only="on" in (selected_only or [])
+        simplified="on" in (simplify_val or [])
+        shown=g
+        label="whole"
+        highlight=set()
+        if mode=="knots" and state.get('knotted_loops'):
+            sel=knotted_loop_selection(knot_idx or 0)
+            highlight=sel[1]
+            label=f"knotted-loop-{(knot_idx or 0)%len(state['knotted_loops'])+1}"
+            if only:
+                shown=g.edge_subgraph(tuple(e) for e in sel[1])
+        elif mode=="multi" and state.get('multi_subgraphs'):
+            idx=(idx or 0)%len(state['multi_subgraphs'])
+            sub=state['multi_subgraphs'][idx]
+            highlight={frozenset(e) for e in sub.edges()}
+            label=f"{state.get('obs_method')}-{idx+1}"
+            params.update(within=state.get('obs_method'),subgraph_index=idx)
+            if only:
+                shown=displayed_subgraph(idx,simplified,"kmt")
+                highlight=set()
+                if simplified:
+                    params.update(simplified=True,simplify_method="kmt")
+                    label+="-simplified"
+        elif mode=="highlight" and state.get('obs') is not None:
+            highlight=state['obs_edges']
+            label="obstruction"
+        coords=state.get('node_pos_3d',{})
+        def coord(n):
+            c=shown.nodes[n].get('coords')
+            if c is None:
+                c=coords.get(n)
+            return None if c is None else [float(x) for x in c]
+        data=dict(params=params,view=label,
+                  nodes=[dict(id=str(n),coords=coord(n)) for n in shown.nodes()],
+                  edges=[{**{k:v2 for k,v2 in d.items() if isinstance(v2,(str,int,float,bool))},"source":str(u),"target":str(v)}
+                         for u,v,d in shown.edges(data=True)],
+                  highlighted_edges=[sorted(map(str,e)) for e in highlight])
+        # same data as the knot cache file for this graph, when one exists
+        try:
+            with open(_knot_cache_path(shown,coords,500,params=params)) as f:
+                data['knot_cache']=json.load(f)
+        except (OSError,ValueError):
+            pass
+        pid=re.sub(r"[^A-Za-z0-9_.-]+","-",str(params.get('pdbid') or 'graph'))
+        return dict(content=json.dumps(data,indent=1),filename=f"{pid}_{label}.json",type="application/json")
 
     @app.callback(Output("export-3d-download","data"),
     Input("export-3d-btn","n_clicks"),State("graph-3d","figure"),State("title-text","children"),
