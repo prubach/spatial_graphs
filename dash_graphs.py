@@ -84,6 +84,7 @@ from graph_data import (
     _load_graph,
     cif_label_to_auth,
     list_data_pdbids,
+    split_pdbid_chain,
     load_graph_by_id,
     merge_residue_nodes,
     read_simlified_graph_from_file,
@@ -119,7 +120,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         pos={n:(coord[0],coord[1]) for n,coord in node_pos_3d.items()}
         state.update(G=g,pos=pos,node_pos_3d=node_pos_3d,knotted_loops=[],within_cache={},within_job=None,obs_method=method,graph_params=params or {},
                      **compute_obstructions(g,pos,method))
-    recompute(G,params=dict(pdbid=pdbid or None,source="topoly" if is_topoly else "simplified",
+    recompute(G,params=dict(pdbid=split_pdbid_chain(pdbid)[0] or None,chain=split_pdbid_chain(pdbid)[1] if pdbid else None,source="topoly" if is_topoly else "simplified",
                             reduce=str(TopolyReduce.INTERNAL),numbering="auth",merge_residues=False))
 
     def get_simplified_subgraph(idx,selected_graph,method='kmt'):
@@ -322,7 +323,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         print(f'nodes: {sorted(g.nodes())}')
         print(f'edges: {sorted(g.edges())}')
         print('--------------------------------------------')
-        recompute(g,obs_method or "ogdf",dict(pdbid=pdbid_value,source=source_type,reduce=str(reduce_value),
+        recompute(g,obs_method or "ogdf",dict(pdbid=split_pdbid_chain(pdbid_value)[0],chain=split_pdbid_chain(pdbid_value)[1],source=source_type,reduce=str(reduce_value),
                                                numbering=numbering,merge_residues=bool(merge)))
         options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(g)]
         return make_title(f"{pdbid_value}-{tit}",g),options,"type" if "type" in edge_attr_keys(g) else "none","original",0,(version or 0)+1
@@ -803,7 +804,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                 data['knot_cache']=json.load(f)
         except (OSError,ValueError):
             pass
-        pid=re.sub(r"[^A-Za-z0-9_.-]+","-",str(params.get('pdbid') or 'graph'))
+        pid=re.sub(r"[^A-Za-z0-9_.-]+","-","_".join(str(x) for x in (params.get('pdbid'),params.get('chain')) if x) or 'graph')
         return dict(content=json.dumps(data,indent=1),filename=f"{pid}_{label}.json",type="application/json")
 
     @app.callback(Output("export-3d-download","data"),

@@ -21,18 +21,26 @@ TOPOLY_REDUCE_OPTIONS = [
 ]
 
 
+def split_pdbid_chain(pdbid):
+    """'4B56B' -> ('4B56', 'B'); a plain PDB id means chain A."""
+    pdbid = (pdbid or '').strip()
+    return pdbid[:4], (pdbid[4:].strip() or 'A')
+
+
 def list_data_pdbids(data_dir='data'):
-    """PDB ids (with the chain appended when a simplified file names a chain other than A)
-    for the structures available in the data folder."""
+    """One entry per structure and chain: the PDB id with the chain appended unless it is A.
+    Chains are the ones of the simplified files; structures without them are listed as chain A."""
     ids={}
     for name in os.listdir(data_dir):
         base,ext=os.path.splitext(name)
         if ext.lower() in ('.pdb','.cif'):
-            ids.setdefault(base.upper(),'')
+            ids.setdefault(base.upper(),set())
         elif name.endswith('_simplified_bonds.csv'):
             pid,_,chain=name[:-len('_simplified_bonds.csv')].partition('-')
-            ids[pid.upper()]=chain
-    return [pid+(chain if chain and chain!='A' else '') for pid,chain in sorted(ids.items())]
+            ids.setdefault(pid.upper(),set()).add(chain or 'A')
+    return [pid+(chain if chain!='A' else '') for pid,chains in sorted(ids.items()) for chain in sorted(chains or {'A'})]
+
+
 def merge_residue_nodes(G):
     """Collapse the atom nodes (<residue>_<atom>) of each residue into a single residue node.
     The edges inside a residue (side chain) disappear; bridges end up attached to the residue.
@@ -59,10 +67,7 @@ def merge_residue_nodes(G):
 def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL,numbering='auth',merge_residues=False):
     """Load a graph for a PDB id using either the topoly bridge extraction or
     the pre-simplified CSV/JSON pair. Returns (graph, source_label)."""
-    chain = 'A'
-    if len(pdbid)>4:
-        chain = pdbid[4:].strip()
-        pdbid = pdbid[:4]
+    pdbid,chain = split_pdbid_chain(pdbid)
     G,label=_load_graph(pdbid,chain,is_topoly,reduce,numbering)
     return (merge_residue_nodes(G) if merge_residues else G),label
 def _load_graph(pdbid,chain,is_topoly,reduce,numbering):

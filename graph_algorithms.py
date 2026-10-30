@@ -654,7 +654,7 @@ def classify_homfly(res, max_unknot=0.5, min_knot=0.48):
     return None
 KNOT_CACHE_DIR = os.environ.get('KNOT_CACHE_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'knot_cache'))
 def _knot_cache_path(graph, node_pos_3d, tries, kind='', params=None):
-    """Cache file path: <pdbid>/<pdbid>_<source>_<within>_<subgraph index>_<nodes>n_<hash>.json.
+    """Cache file path: <pdbid>/<pdbid>_<chain>_<source>_<within>_<subgraph index>_<nodes>n_<hash>.json.
     The hash covers the graph's edges, node coordinates and the HOMFLY settings, so graphs that
     differ only in e.g. simplification still get distinct files."""
     import hashlib
@@ -671,7 +671,7 @@ def _knot_cache_path(graph, node_pos_3d, tries, kind='', params=None):
     if params.get('simplified'):
         within += '-simplified'
     index = params.get('subgraph_index')
-    parts = [params.get('pdbid') or 'unknown', params.get('source') or 'unknown', within,
+    parts = [params.get('pdbid') or 'unknown', params.get('chain') or 'A', params.get('source') or 'unknown', within,
              '-' if index is None else str(index), f'{graph.number_of_nodes()}n', h.hexdigest()[:12]]
     parts = [re.sub(r'[^A-Za-z0-9.,+-]', '-', str(x)) for x in parts]
     return os.path.join(KNOT_CACHE_DIR, parts[0], '_'.join(parts) + '.json')
