@@ -1,0 +1,738 @@
+[18:38:56] Enumerating loops of a graph with 106 nodes and 127 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:38:56] Found 590 loops in 0s
+[18:38:57] HOMFLY: 1/590 loops analyzed (1s elapsed)
+[18:39:07] HOMFLY: 90/590 loops analyzed (11s elapsed)
+[18:39:17] HOMFLY: 166/590 loops analyzed (21s elapsed)
+[18:39:27] HOMFLY: 249/590 loops analyzed (31s elapsed)
+[18:39:38] HOMFLY: 336/590 loops analyzed (41s elapsed)
+[18:39:48] HOMFLY: 424/590 loops analyzed (51s elapsed)
+[18:39:58] HOMFLY: 510/590 loops analyzed (61s elapsed)
+[18:40:07] HOMFLY: 590/590 loops analyzed (70s elapsed)
+[18:40:07] Loop analysis finished: 4 knotted of 590 loops
+[18:40:07] Knotted K_3,3 search: 4 knotted loops to expand
+[18:40:07] Knotted K_3,3 search: loop 1/4 (29 nodes) -> 18 K_3,3 subdivisions
+[18:40:07] Knotted K_3,3 search: loop 2/4 (28 nodes) -> 18 K_3,3 subdivisions
+[18:40:08] Knotted K_3,3 search: loop 3/4 (27 nodes) -> 18 K_3,3 subdivisions
+[18:40:08] Knotted K_3,3 search: loop 4/4 (26 nodes) -> 18 K_3,3 subdivisions
+[18:40:08] Enumerating loops of a graph with 33 nodes and 36 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:08] Found 15 loops in 0s
+[18:40:09] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:10] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:10] Loop analysis finished: 1 knotted of 15 loops
+[18:40:10] Enumerating loops of a graph with 34 nodes and 37 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:10] Found 15 loops in 0s
+[18:40:11] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:12] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:12] Loop analysis finished: 1 knotted of 15 loops
+[18:40:12] Enumerating loops of a graph with 34 nodes and 37 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:12] Found 15 loops in 0s
+[18:40:12] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:13] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:13] Loop analysis finished: 1 knotted of 15 loops
+[18:40:13] Enumerating loops of a graph with 34 nodes and 37 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:13] Found 15 loops in 0s
+[18:40:14] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:15] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:15] Loop analysis finished: 1 knotted of 15 loops
+[18:40:15] Enumerating loops of a graph with 34 nodes and 37 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:15] Found 15 loops in 0s
+[18:40:16] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:17] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:17] Loop analysis finished: 1 knotted of 15 loops
+[18:40:17] Enumerating loops of a graph with 35 nodes and 38 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:17] Found 15 loops in 0s
+[18:40:18] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:19] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:19] Loop analysis finished: 1 knotted of 15 loops
+[18:40:19] Enumerating loops of a graph with 35 nodes and 38 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:19] Found 15 loops in 0s
+[18:40:20] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:21] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:21] Loop analysis finished: 1 knotted of 15 loops
+[18:40:21] Enumerating loops of a graph with 35 nodes and 38 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:21] Found 15 loops in 0s
+[18:40:21] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:23] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:23] Loop analysis finished: 1 knotted of 15 loops
+[18:40:23] Enumerating loops of a graph with 35 nodes and 38 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:23] Found 15 loops in 0s
+[18:40:23] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:25] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:25] Loop analysis finished: 1 knotted of 15 loops
+[18:40:25] Enumerating loops of a graph with 35 nodes and 38 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:25] Found 15 loops in 0s
+[18:40:25] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:26] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:26] Loop analysis finished: 1 knotted of 15 loops
+[18:40:26] Enumerating loops of a graph with 35 nodes and 38 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:26] Found 15 loops in 0s
+[18:40:27] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:28] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:28] Loop analysis finished: 1 knotted of 15 loops
+[18:40:28] Enumerating loops of a graph with 35 nodes and 38 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:28] Found 15 loops in 0s
+[18:40:29] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:30] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:30] Loop analysis finished: 1 knotted of 15 loops
+[18:40:30] Enumerating loops of a graph with 35 nodes and 38 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:30] Found 15 loops in 0s
+[18:40:31] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:32] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:32] Loop analysis finished: 1 knotted of 15 loops
+[18:40:32] Enumerating loops of a graph with 35 nodes and 38 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:32] Found 15 loops in 0s
+[18:40:32] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:33] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:33] Loop analysis finished: 1 knotted of 15 loops
+[18:40:33] Enumerating loops of a graph with 35 nodes and 38 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:33] Found 15 loops in 0s
+[18:40:34] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:35] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:35] Loop analysis finished: 1 knotted of 15 loops
+[18:40:35] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:35] Found 15 loops in 0s
+[18:40:36] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:37] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:37] Loop analysis finished: 1 knotted of 15 loops
+[18:40:37] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:37] Found 15 loops in 0s
+[18:40:38] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:39] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:39] Loop analysis finished: 1 knotted of 15 loops
+[18:40:39] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:39] Found 15 loops in 0s
+[18:40:40] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:41] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:41] Loop analysis finished: 1 knotted of 15 loops
+[18:40:41] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:41] Found 15 loops in 0s
+[18:40:42] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:43] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:43] Loop analysis finished: 1 knotted of 15 loops
+[18:40:43] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:43] Found 15 loops in 0s
+[18:40:43] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:44] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:44] Loop analysis finished: 1 knotted of 15 loops
+[18:40:44] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:45] Found 15 loops in 0s
+[18:40:45] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:46] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:46] Loop analysis finished: 1 knotted of 15 loops
+[18:40:46] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:46] Found 15 loops in 0s
+[18:40:47] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:48] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:48] Loop analysis finished: 1 knotted of 15 loops
+[18:40:48] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:48] Found 15 loops in 0s
+[18:40:49] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:50] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:50] Loop analysis finished: 1 knotted of 15 loops
+[18:40:50] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:50] Found 15 loops in 0s
+[18:40:51] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:52] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:52] Loop analysis finished: 1 knotted of 15 loops
+[18:40:52] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:52] Found 15 loops in 0s
+[18:40:53] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:54] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:54] Loop analysis finished: 1 knotted of 15 loops
+[18:40:54] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:54] Found 15 loops in 0s
+[18:40:54] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:56] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:56] Loop analysis finished: 1 knotted of 15 loops
+[18:40:56] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:56] Found 15 loops in 0s
+[18:40:56] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:57] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:57] Loop analysis finished: 1 knotted of 15 loops
+[18:40:57] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:57] Found 15 loops in 0s
+[18:40:58] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:40:59] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:40:59] Loop analysis finished: 1 knotted of 15 loops
+[18:40:59] Enumerating loops of a graph with 36 nodes and 39 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:40:59] Found 15 loops in 0s
+[18:41:00] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:01] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:01] Loop analysis finished: 1 knotted of 15 loops
+[18:41:01] Enumerating loops of a graph with 37 nodes and 40 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:01] Found 15 loops in 0s
+[18:41:02] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:03] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:03] Loop analysis finished: 1 knotted of 15 loops
+[18:41:03] Enumerating loops of a graph with 37 nodes and 40 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:03] Found 15 loops in 0s
+[18:41:04] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:05] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:05] Loop analysis finished: 1 knotted of 15 loops
+[18:41:05] Enumerating loops of a graph with 37 nodes and 40 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:05] Found 15 loops in 0s
+[18:41:06] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:07] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:07] Loop analysis finished: 1 knotted of 15 loops
+[18:41:07] Enumerating loops of a graph with 37 nodes and 40 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:07] Found 15 loops in 0s
+[18:41:07] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:09] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:09] Loop analysis finished: 1 knotted of 15 loops
+[18:41:09] Enumerating loops of a graph with 37 nodes and 40 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:09] Found 15 loops in 0s
+[18:41:09] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:10] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:10] Loop analysis finished: 1 knotted of 15 loops
+[18:41:10] Enumerating loops of a graph with 37 nodes and 40 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:10] Found 15 loops in 0s
+[18:41:11] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:12] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:12] Loop analysis finished: 1 knotted of 15 loops
+[18:41:12] Enumerating loops of a graph with 37 nodes and 40 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:12] Found 15 loops in 0s
+[18:41:13] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:14] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:14] Loop analysis finished: 1 knotted of 15 loops
+[18:41:14] Enumerating loops of a graph with 37 nodes and 40 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:14] Found 15 loops in 0s
+[18:41:15] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:16] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:16] Loop analysis finished: 1 knotted of 15 loops
+[18:41:16] Enumerating loops of a graph with 37 nodes and 40 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:16] Found 15 loops in 0s
+[18:41:17] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:18] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:18] Loop analysis finished: 1 knotted of 15 loops
+[18:41:18] Enumerating loops of a graph with 37 nodes and 40 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:18] Found 15 loops in 0s
+[18:41:19] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:20] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:20] Loop analysis finished: 1 knotted of 15 loops
+[18:41:20] Enumerating loops of a graph with 37 nodes and 40 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:20] Found 15 loops in 0s
+[18:41:20] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:22] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:22] Loop analysis finished: 1 knotted of 15 loops
+[18:41:22] Enumerating loops of a graph with 37 nodes and 40 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:22] Found 15 loops in 0s
+[18:41:22] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:23] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:23] Loop analysis finished: 1 knotted of 15 loops
+[18:41:23] Enumerating loops of a graph with 37 nodes and 40 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:23] Found 15 loops in 0s
+[18:41:24] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:25] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:25] Loop analysis finished: 1 knotted of 15 loops
+[18:41:25] Enumerating loops of a graph with 38 nodes and 41 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:25] Found 15 loops in 0s
+[18:41:26] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:27] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:27] Loop analysis finished: 1 knotted of 15 loops
+[18:41:27] Enumerating loops of a graph with 38 nodes and 41 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:27] Found 15 loops in 0s
+[18:41:28] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:29] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:29] Loop analysis finished: 1 knotted of 15 loops
+[18:41:29] Enumerating loops of a graph with 38 nodes and 41 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:29] Found 15 loops in 0s
+[18:41:30] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:31] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:31] Loop analysis finished: 1 knotted of 15 loops
+[18:41:31] Enumerating loops of a graph with 38 nodes and 41 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:31] Found 15 loops in 0s
+[18:41:32] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:33] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:33] Loop analysis finished: 1 knotted of 15 loops
+[18:41:33] Enumerating loops of a graph with 38 nodes and 41 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:33] Found 15 loops in 0s
+[18:41:33] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:34] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:34] Loop analysis finished: 1 knotted of 15 loops
+[18:41:34] Enumerating loops of a graph with 38 nodes and 41 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:34] Found 15 loops in 0s
+[18:41:35] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:36] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:36] Loop analysis finished: 1 knotted of 15 loops
+[18:41:36] Enumerating loops of a graph with 38 nodes and 41 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:36] Found 15 loops in 0s
+[18:41:37] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:38] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:38] Loop analysis finished: 1 knotted of 15 loops
+[18:41:38] Enumerating loops of a graph with 38 nodes and 41 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:38] Found 15 loops in 0s
+[18:41:39] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:40] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:40] Loop analysis finished: 1 knotted of 15 loops
+[18:41:40] Enumerating loops of a graph with 38 nodes and 41 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:40] Found 15 loops in 0s
+[18:41:41] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:42] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:42] Loop analysis finished: 1 knotted of 15 loops
+[18:41:42] Enumerating loops of a graph with 38 nodes and 41 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:42] Found 15 loops in 0s
+[18:41:42] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:44] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:44] Loop analysis finished: 1 knotted of 15 loops
+[18:41:44] Enumerating loops of a graph with 38 nodes and 41 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:44] Found 15 loops in 0s
+[18:41:44] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:45] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:45] Loop analysis finished: 1 knotted of 15 loops
+[18:41:45] Enumerating loops of a graph with 38 nodes and 41 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:45] Found 15 loops in 0s
+[18:41:46] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:47] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:47] Loop analysis finished: 1 knotted of 15 loops
+[18:41:47] Enumerating loops of a graph with 39 nodes and 42 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:47] Found 15 loops in 0s
+[18:41:48] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:49] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:49] Loop analysis finished: 1 knotted of 15 loops
+[18:41:49] Enumerating loops of a graph with 39 nodes and 42 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:49] Found 15 loops in 0s
+[18:41:50] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:51] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:51] Loop analysis finished: 1 knotted of 15 loops
+[18:41:51] Enumerating loops of a graph with 39 nodes and 42 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:51] Found 15 loops in 0s
+[18:41:51] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:52] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:52] Loop analysis finished: 1 knotted of 15 loops
+[18:41:52] Enumerating loops of a graph with 39 nodes and 42 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:52] Found 15 loops in 0s
+[18:41:53] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:54] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:54] Loop analysis finished: 1 knotted of 15 loops
+[18:41:54] Enumerating loops of a graph with 39 nodes and 42 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:54] Found 15 loops in 0s
+[18:41:55] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:56] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:56] Loop analysis finished: 1 knotted of 15 loops
+[18:41:56] Enumerating loops of a graph with 39 nodes and 42 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:56] Found 15 loops in 0s
+[18:41:57] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:58] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:58] Loop analysis finished: 1 knotted of 15 loops
+[18:41:58] Enumerating loops of a graph with 39 nodes and 42 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:41:58] Found 15 loops in 0s
+[18:41:58] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:41:59] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:41:59] Loop analysis finished: 1 knotted of 15 loops
+[18:41:59] Enumerating loops of a graph with 39 nodes and 42 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:00] Found 15 loops in 0s
+[18:42:00] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:01] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:01] Loop analysis finished: 1 knotted of 15 loops
+[18:42:01] Enumerating loops of a graph with 40 nodes and 43 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:01] Found 15 loops in 0s
+[18:42:02] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:03] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:03] Loop analysis finished: 1 knotted of 15 loops
+[18:42:03] Enumerating loops of a graph with 40 nodes and 43 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:03] Found 15 loops in 0s
+[18:42:04] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:05] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:05] Loop analysis finished: 1 knotted of 15 loops
+[18:42:05] Enumerating loops of a graph with 40 nodes and 43 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:05] Found 15 loops in 0s
+[18:42:06] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:07] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:07] Loop analysis finished: 1 knotted of 15 loops
+[18:42:07] Enumerating loops of a graph with 40 nodes and 43 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:07] Found 15 loops in 0s
+[18:42:08] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:09] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:09] Loop analysis finished: 1 knotted of 15 loops
+[18:42:09] Enumerating loops of a graph with 41 nodes and 44 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:09] Found 15 loops in 0s
+[18:42:10] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:11] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:11] Loop analysis finished: 1 knotted of 15 loops
+[18:42:11] Enumerating loops of a graph with 41 nodes and 44 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:11] Found 15 loops in 0s
+[18:42:11] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:12] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:12] Loop analysis finished: 1 knotted of 15 loops
+[18:42:12] Enumerating loops of a graph with 41 nodes and 44 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:12] Found 15 loops in 0s
+[18:42:13] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:14] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:14] Loop analysis finished: 1 knotted of 15 loops
+[18:42:14] Enumerating loops of a graph with 41 nodes and 44 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:14] Found 15 loops in 0s
+[18:42:15] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:16] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:16] Loop analysis finished: 1 knotted of 15 loops
+[18:42:16] Enumerating loops of a graph with 42 nodes and 45 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:16] Found 15 loops in 0s
+[18:42:17] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:18] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:18] Loop analysis finished: 1 knotted of 15 loops
+[18:42:18] Enumerating loops of a graph with 42 nodes and 45 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:18] Found 15 loops in 0s
+[18:42:19] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:20] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:20] Loop analysis finished: 1 knotted of 15 loops
+[18:42:20] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:20] Found 15 loops in 0s
+[18:42:21] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:22] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:22] Loop analysis finished: 1 knotted of 15 loops
+[18:42:22] Enumerating loops of a graph with 23 nodes and 26 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:22] Found 15 loops in 0s
+[18:42:23] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:24] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:24] Loop analysis finished: 1 knotted of 15 loops
+[18:42:24] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:24] Found 15 loops in 0s
+[18:42:24] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:26] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:26] Loop analysis finished: 1 knotted of 15 loops
+[18:42:26] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:26] Found 15 loops in 0s
+[18:42:26] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:27] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:27] Loop analysis finished: 1 knotted of 15 loops
+[18:42:27] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:27] Found 15 loops in 0s
+[18:42:28] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:29] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:29] Loop analysis finished: 1 knotted of 15 loops
+[18:42:29] Enumerating loops of a graph with 23 nodes and 26 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:29] Found 15 loops in 0s
+[18:42:30] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:31] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:31] Loop analysis finished: 1 knotted of 15 loops
+[18:42:31] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:31] Found 15 loops in 0s
+[18:42:32] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:33] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:33] Loop analysis finished: 1 knotted of 15 loops
+[18:42:33] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:33] Found 15 loops in 0s
+[18:42:34] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:35] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:35] Loop analysis finished: 1 knotted of 15 loops
+[18:42:35] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:35] Found 15 loops in 0s
+[18:42:35] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:36] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:36] Loop analysis finished: 1 knotted of 15 loops
+[18:42:36] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:36] Found 15 loops in 0s
+[18:42:37] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:38] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:38] Loop analysis finished: 1 knotted of 15 loops
+[18:42:38] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:38] Found 15 loops in 0s
+[18:42:39] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:40] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:40] Loop analysis finished: 1 knotted of 15 loops
+[18:42:40] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:40] Found 15 loops in 0s
+[18:42:41] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:42] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:42] Loop analysis finished: 1 knotted of 15 loops
+[18:42:42] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:42] Found 15 loops in 0s
+[18:42:43] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:44] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:44] Loop analysis finished: 1 knotted of 15 loops
+[18:42:44] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:44] Found 15 loops in 0s
+[18:42:44] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:45] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:45] Loop analysis finished: 1 knotted of 15 loops
+[18:42:45] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:45] Found 15 loops in 0s
+[18:42:46] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:47] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:47] Loop analysis finished: 1 knotted of 15 loops
+[18:42:47] Enumerating loops of a graph with 23 nodes and 26 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:47] Found 15 loops in 0s
+[18:42:48] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:49] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:49] Loop analysis finished: 1 knotted of 15 loops
+[18:42:49] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:49] Found 15 loops in 0s
+[18:42:50] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:51] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:51] Loop analysis finished: 1 knotted of 15 loops
+[18:42:51] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:51] Found 15 loops in 0s
+[18:42:52] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:53] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:53] Loop analysis finished: 1 knotted of 15 loops
+[18:42:53] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:53] Found 15 loops in 0s
+[18:42:53] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:55] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:55] Loop analysis finished: 1 knotted of 15 loops
+[18:42:55] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:55] Found 15 loops in 0s
+[18:42:55] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:56] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:56] Loop analysis finished: 1 knotted of 15 loops
+[18:42:56] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:56] Found 15 loops in 0s
+[18:42:57] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:42:58] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:42:58] Loop analysis finished: 1 knotted of 15 loops
+[18:42:58] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:42:58] Found 15 loops in 0s
+[18:42:59] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:00] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:00] Loop analysis finished: 1 knotted of 15 loops
+[18:43:00] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:00] Found 15 loops in 0s
+[18:43:01] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:02] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:02] Loop analysis finished: 1 knotted of 15 loops
+[18:43:02] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:02] Found 15 loops in 0s
+[18:43:02] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:03] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:03] Loop analysis finished: 1 knotted of 15 loops
+[18:43:03] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:04] Found 15 loops in 0s
+[18:43:04] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:05] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:05] Loop analysis finished: 1 knotted of 15 loops
+[18:43:05] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:05] Found 15 loops in 0s
+[18:43:06] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:07] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:07] Loop analysis finished: 1 knotted of 15 loops
+[18:43:07] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:07] Found 15 loops in 0s
+[18:43:08] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:09] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:09] Loop analysis finished: 1 knotted of 15 loops
+[18:43:09] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:09] Found 15 loops in 0s
+[18:43:10] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:11] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:11] Loop analysis finished: 1 knotted of 15 loops
+[18:43:11] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:11] Found 15 loops in 0s
+[18:43:11] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:13] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:13] Loop analysis finished: 1 knotted of 15 loops
+[18:43:13] Enumerating loops of a graph with 23 nodes and 26 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:13] Found 15 loops in 0s
+[18:43:13] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:14] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:14] Loop analysis finished: 1 knotted of 15 loops
+[18:43:14] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:14] Found 15 loops in 0s
+[18:43:15] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:16] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:16] Loop analysis finished: 1 knotted of 15 loops
+[18:43:16] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:16] Found 15 loops in 0s
+[18:43:17] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:18] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:18] Loop analysis finished: 1 knotted of 15 loops
+[18:43:18] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:18] Found 15 loops in 0s
+[18:43:19] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:20] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:20] Loop analysis finished: 1 knotted of 15 loops
+[18:43:20] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:20] Found 15 loops in 0s
+[18:43:21] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:22] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:22] Loop analysis finished: 1 knotted of 15 loops
+[18:43:22] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:22] Found 15 loops in 0s
+[18:43:22] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:23] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:23] Loop analysis finished: 1 knotted of 15 loops
+[18:43:24] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:24] Found 15 loops in 0s
+[18:43:24] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:25] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:25] Loop analysis finished: 1 knotted of 15 loops
+[18:43:25] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:25] Found 15 loops in 0s
+[18:43:26] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:27] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:27] Loop analysis finished: 1 knotted of 15 loops
+[18:43:27] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:27] Found 15 loops in 0s
+[18:43:28] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:29] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:29] Loop analysis finished: 1 knotted of 15 loops
+[18:43:29] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:29] Found 15 loops in 0s
+[18:43:30] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:31] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:31] Loop analysis finished: 1 knotted of 15 loops
+[18:43:31] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:31] Found 15 loops in 0s
+[18:43:32] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:33] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:33] Loop analysis finished: 1 knotted of 15 loops
+[18:43:33] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:33] Found 15 loops in 0s
+[18:43:33] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:34] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:34] Loop analysis finished: 1 knotted of 15 loops
+[18:43:34] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:34] Found 15 loops in 0s
+[18:43:35] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:36] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:36] Loop analysis finished: 1 knotted of 15 loops
+[18:43:36] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:36] Found 15 loops in 0s
+[18:43:37] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:38] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:38] Loop analysis finished: 1 knotted of 15 loops
+[18:43:38] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:38] Found 15 loops in 0s
+[18:43:39] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:40] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:40] Loop analysis finished: 1 knotted of 15 loops
+[18:43:40] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:40] Found 15 loops in 0s
+[18:43:41] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:42] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:42] Loop analysis finished: 1 knotted of 15 loops
+[18:43:42] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:42] Found 15 loops in 0s
+[18:43:42] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:44] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:44] Loop analysis finished: 1 knotted of 15 loops
+[18:43:44] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:44] Found 15 loops in 0s
+[18:43:44] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:45] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:45] Loop analysis finished: 1 knotted of 15 loops
+[18:43:45] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:45] Found 15 loops in 0s
+[18:43:46] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:47] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:47] Loop analysis finished: 1 knotted of 15 loops
+[18:43:47] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:47] Found 15 loops in 0s
+[18:43:48] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:49] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:49] Loop analysis finished: 1 knotted of 15 loops
+[18:43:49] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:49] Found 15 loops in 0s
+[18:43:50] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:51] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:51] Loop analysis finished: 1 knotted of 15 loops
+[18:43:51] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:51] Found 15 loops in 0s
+[18:43:52] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:53] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:53] Loop analysis finished: 1 knotted of 15 loops
+[18:43:53] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:53] Found 15 loops in 0s
+[18:43:54] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:55] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:55] Loop analysis finished: 1 knotted of 15 loops
+[18:43:55] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:55] Found 15 loops in 0s
+[18:43:55] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:57] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:57] Loop analysis finished: 1 knotted of 15 loops
+[18:43:57] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:57] Found 15 loops in 0s
+[18:43:57] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:43:58] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:43:58] Loop analysis finished: 1 knotted of 15 loops
+[18:43:58] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:43:58] Found 15 loops in 0s
+[18:43:59] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:00] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:00] Loop analysis finished: 1 knotted of 15 loops
+[18:44:00] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:00] Found 15 loops in 0s
+[18:44:01] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:02] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:02] Loop analysis finished: 1 knotted of 15 loops
+[18:44:02] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:02] Found 15 loops in 0s
+[18:44:03] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:04] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:04] Loop analysis finished: 1 knotted of 15 loops
+[18:44:04] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:04] Found 15 loops in 0s
+[18:44:05] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:06] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:06] Loop analysis finished: 1 knotted of 15 loops
+[18:44:06] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:06] Found 15 loops in 0s
+[18:44:06] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:07] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:07] Loop analysis finished: 1 knotted of 15 loops
+[18:44:07] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:07] Found 15 loops in 0s
+[18:44:08] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:09] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:09] Loop analysis finished: 1 knotted of 15 loops
+[18:44:09] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:09] Found 15 loops in 0s
+[18:44:10] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:11] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:11] Loop analysis finished: 1 knotted of 15 loops
+[18:44:11] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:11] Found 15 loops in 0s
+[18:44:12] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:13] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:13] Loop analysis finished: 1 knotted of 15 loops
+[18:44:13] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:13] Found 15 loops in 0s
+[18:44:14] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:15] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:15] Loop analysis finished: 1 knotted of 15 loops
+[18:44:15] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:15] Found 15 loops in 0s
+[18:44:15] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:16] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:16] Loop analysis finished: 1 knotted of 15 loops
+[18:44:16] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:16] Found 15 loops in 0s
+[18:44:17] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:18] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:18] Loop analysis finished: 1 knotted of 15 loops
+[18:44:18] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:18] Found 15 loops in 0s
+[18:44:19] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:20] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:20] Loop analysis finished: 1 knotted of 15 loops
+[18:44:20] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:20] Found 15 loops in 0s
+[18:44:21] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:22] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:22] Loop analysis finished: 1 knotted of 15 loops
+[18:44:22] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:22] Found 15 loops in 0s
+[18:44:23] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:24] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:24] Loop analysis finished: 1 knotted of 15 loops
+[18:44:24] Enumerating loops of a graph with 21 nodes and 24 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:24] Found 15 loops in 0s
+[18:44:24] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:25] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:25] Loop analysis finished: 1 knotted of 15 loops
+[18:44:25] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:25] Found 15 loops in 0s
+[18:44:26] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:27] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:27] Loop analysis finished: 1 knotted of 15 loops
+[18:44:27] Enumerating loops of a graph with 24 nodes and 27 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:27] Found 15 loops in 0s
+[18:44:28] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:29] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:29] Loop analysis finished: 1 knotted of 15 loops
+[18:44:29] Enumerating loops of a graph with 22 nodes and 25 edges (exponential in the number of independent cycles; counts are logged every 10s)...
+[18:44:29] Found 15 loops in 0s
+[18:44:30] HOMFLY: 1/15 loops analyzed (1s elapsed)
+[18:44:31] HOMFLY: 15/15 loops analyzed (2s elapsed)
+[18:44:31] Loop analysis finished: 1 knotted of 15 loops
+nodes: ['1001_CA', '1002_CA', '1003_CA', '1004_NA', '187_CA', '187_OD2', '188_C', '188_O', '193_CA', '193_OD1', '194_C', '194_O', '195_CA', '195_CG', '195_OD1', '195_OD2', '196_C', '196_O', '199_C', '235_N', '300_N', '304_N', '328_CA', '328_OD1', '329_C', '329_O', '334_CA', '334_OD1', '335_C', '335_O', '336_CA', '336_CG', '336_OD1', '336_OD2', '337_C', '337_O', '340_N', '375_C', '396_CA', '441_C', '443_C', '469_CA', '469_OD1', '470_C', '470_O', '475_CA', '475_OD1', '476_C', '476_O', '477_CA', '477_CG', '477_OD1', '477_OD2', '478_C', '478_O']
+edges: [('1001_CA', '475_OD1'), ('1002_CA', '469_OD1'), ('1003_CA', '334_OD1'), ('187_OD2', '1003_CA'), ('187_OD2', '187_CA'), ('188_C', '187_CA'), ('188_C', '188_O'), ('188_C', '193_CA'), ('188_O', '1003_CA'), ('193_OD1', '1002_CA'), ('193_OD1', '193_CA'), ('194_C', '193_CA'), ('194_C', '194_O'), ('194_C', '195_CA'), ('194_O', '1002_CA'), ('195_CG', '195_CA'), ('195_CG', '195_OD1'), ('195_CG', '195_OD2'), ('195_OD1', '1002_CA'), ('195_OD2', '1003_CA'), ('196_C', '195_CA'), ('196_C', '196_O'), ('196_C', '199_C'), ('196_O', '1004_NA'), ('199_C', '235_N'), ('300_N', '235_N'), ('304_N', '300_N'), ('328_CA', '304_N'), ('328_OD1', '1001_CA'), ('328_OD1', '328_CA'), ('329_C', '328_CA'), ('329_C', '329_O'), ('329_C', '334_CA'), ('329_O', '1001_CA'), ('334_OD1', '334_CA'), ('335_C', '334_CA'), ('335_C', '335_O'), ('335_C', '336_CA'), ('335_O', '1003_CA'), ('336_CG', '336_CA'), ('336_CG', '336_OD1'), ('336_CG', '336_OD2'), ('336_OD1', '1001_CA'), ('336_OD2', '1003_CA'), ('337_C', '336_CA'), ('337_C', '337_O'), ('337_C', '340_N'), ('337_O', '1004_NA'), ('340_N', '375_C'), ('396_CA', '375_C'), ('441_C', '396_CA'), ('441_C', '443_C'), ('469_CA', '443_C'), ('469_OD1', '469_CA'), ('470_C', '469_CA'), ('470_C', '470_O'), ('470_C', '475_CA'), ('470_O', '1002_CA'), ('475_OD1', '475_CA'), ('476_C', '475_CA'), ('476_C', '476_O'), ('476_C', '477_CA'), ('476_O', '1001_CA'), ('477_CG', '477_CA'), ('477_CG', '477_OD1'), ('477_CG', '477_OD2'), ('477_OD1', '1001_CA'), ('477_OD2', '1002_CA'), ('478_C', '477_CA'), ('478_C', '478_O'), ('478_O', '1004_NA')]
