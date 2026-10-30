@@ -1,5 +1,12 @@
 Test Topoly with graph libraries to find K_3,3 or K_5 subgraphs
 
+## Code layout
+
+- `dash_graphs.py` creates the Dash app and registers its callbacks.
+- `graph_algorithms.py` contains planarity, minor/subdivision, simplification, and knot-search algorithms.
+- `graph_visualization.py` converts graph data into Cytoscape and Plotly elements and styles.
+- `graph_data.py` loads and converts the bundled structure data.
+- `wsgi.py` exposes the app's WSGI entry point.
 
 npm install cytoscape-cola
 ## Context path
