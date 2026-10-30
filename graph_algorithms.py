@@ -396,20 +396,112 @@ def find_knotted_k33_subgraphs(graph, node_pos_3d=None, params=None, limit=100):
                 sg.graph['sources'] = ['knotted loop']
                 found[ek] = sg
     return sorted(found.values(), key=lambda g: (g.number_of_nodes(), sorted(map(str, g.nodes()))))[:limit]
+def enumerate_k5_minors(graph, must_contain=None, limit=1000, deadline=None):
+    """All minimal K_5 minor models of `graph` (5 branch trees plus the 10 joining edges; cyclomatic number 6)
+    that contain every edge of `must_contain`. Each biconnected component is reduced to its core (chains of
+    degree-2 nodes become single edges); a model is what is left after deleting cyclomatic-6 core edges and
+    pruning. Chains holding a required edge are never deleted, so a long knotted loop leaves few choices."""
+    from itertools import combinations
+    from math import comb
+    required = {frozenset(e) for e in (must_contain or ())}
+    results, unique = [], set()
+    for block in nx.biconnected_components(graph):
+        if len(block) < 5:
+            continue
+        H = graph.subgraph(block)
+        if any(e not in {frozenset(x) for x in H.edges()} for e in required) and required:
+            continue
+        branch = {n for n in H if H.degree(n) >= 3}
+        chains, seen = [], set()
+        for b in branch:
+            for nb in H.neighbors(b):
+                if frozenset((b, nb)) in seen:
+                    continue
+                path, prev, cur = [b, nb], b, nb
+                while cur not in branch:
+                    nxt = [x for x in H.neighbors(cur) if x != prev][0]
+                    path.append(nxt)
+                    prev, cur = cur, nxt
+                for a, c in zip(path, path[1:]):
+                    seen.add(frozenset((a, c)))
+                chains.append((path[0], path[-1], path))
+        r = len(chains) - len(branch) + 1 - 6
+        if r < 0:
+            continue
+        keep = [i for i, (_, _, path) in enumerate(chains)
+                if any(frozenset(e) in required for e in zip(path, path[1:]))]
+        deletable = [i for i in range(len(chains)) if i not in keep]
+        if r > len(deletable):
+            continue
+        total = comb(len(deletable), r)
+        if total > 100000:
+            _log(f'  K_5 enumeration: {total} edge-removal combinations in a block of {len(block)} nodes')
+        for removed in combinations(deletable, r):
+            if deadline is not None and time.monotonic() > deadline:
+                raise TimeoutError
+            gone = set(removed)
+            core = nx.MultiGraph()
+            for i, (u, v, _) in enumerate(chains):
+                if i not in gone:
+                    core.add_edge(u, v, key=i)
+            leaves = [n for n in core if core.degree(n) <= 1]
+            while leaves:
+                core.remove_nodes_from(leaves)
+                leaves = [n for n in core if core.degree(n) <= 1]
+            if core.number_of_nodes() < 5 or not nx.is_connected(core):
+                continue
+            sg = nx.Graph()
+            for _, _, key in core.edges(keys=True):
+                sg.add_edges_from(zip(chains[key][2], chains[key][2][1:]))
+            ek = frozenset(frozenset(e) for e in sg.edges())
+            if ek in unique:
+                continue
+            unique.add(ek)
+            try:
+                hit = _find_k5_minor(sg, time.monotonic() + 60, set())
+            except TimeoutError:
+                continue
+            if not hit:
+                continue
+            sg.graph['kind'] = 'K_5 minor'
+            results.append(sg)
+            if len(results) >= limit:
+                return results
+    return results
 def find_knotted_k5_minors(graph, node_pos_3d=None, params=None, max_results=None, time_limit=120):
     """K_5 minor models that contain a knotted loop of `graph`.
-    Unlike the K_3,3 case, K_5 minors cannot be enumerated from the loops, so models are searched
+    The models are enumerated from the knotted loops (a model is knotted when one of its cycles is),
     until none remain or the time limit is reached."""
-    loops = [frozenset(loop_edges(lp['nodes'])) for lp in find_knotted_loops(graph, node_pos_3d, params=params)]
-    loops = [frozenset(frozenset(e) for e in lp) for lp in loops]
-    results = []
-    for model in find_k5_minors(graph, max_results=max_results, time_limit=time_limit):
-        edges = {frozenset(e) for e in model.edges()}
-        if any(lp <= edges for lp in loops):
-            model.graph['kind'] = 'K_5 minor'
-            model.graph['sources'] = ['knotted loop']
-            results.append(model)
-    return results
+    loops = find_knotted_loops(graph, node_pos_3d, params=params)
+    deadline = time.monotonic() + time_limit
+    found = {}
+    # per-loop results (also empty ones) are stored so the search is not repeated
+    path = _knot_cache_path(graph, node_pos_3d, 500, kind='k5knot', params=params)
+    stored = (_read_json(path) or {}).get('loops', {})
+    by_str = {str(n): n for n in graph.nodes()}
+    try:
+        for i, lp in enumerate(loops):
+            key = ','.join(sorted(str(n) for n in lp['nodes']))
+            if key in stored:
+                models = [nx.Graph([(by_str[u], by_str[v]) for u, v in edges]) for edges in stored[key]]
+            else:
+                models = enumerate_k5_minors(graph, must_contain=loop_edges(lp['nodes']), deadline=deadline)
+                stored[key] = [[[str(u), str(v)] for u, v in m.edges()] for m in models]
+                _write_json(path, dict(params=dict(params or {}, kind='k5knot'), loops=stored))
+            _log(f'Knotted K_5 search: loop {i + 1}/{len(loops)} ({len(lp["nodes"])} nodes) -> {len(models)} K_5 minors')
+            for model in models:
+                ek = frozenset(frozenset(e) for e in model.edges())
+                if ek not in found:
+                    model.graph['kind'] = 'K_5 minor'
+                    model.graph['sources'] = ['knotted loop']
+                    found[ek] = model
+                    if max_results is not None and len(found) >= max_results:
+                        raise StopIteration
+    except TimeoutError:
+        log.warning('Knotted K_5 minor search stopped after %ss; %d found', time_limit, len(found))
+    except StopIteration:
+        pass
+    return sorted(found.values(), key=lambda g: (g.number_of_nodes(), sorted(map(str, g.nodes()))))
 def find_k33_subgraphs(graph):
     """All K_3,3 subdivisions found by OGDF and SageMath, merged and deduplicated by edge set.
     Each subgraph records in graph['sources'] which finder(s) reported it; a finder that fails is skipped."""

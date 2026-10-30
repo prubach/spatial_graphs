@@ -34,6 +34,19 @@ After choosing a protein, the "Find" panel works as follows:
 - "Highlight knot in full graph" (on by default) colours the knotted loop orange in the full graph when "Show selected obstruction only" is off.
 - "Simplify" (always KMT; also turns on "Show selected obstruction only") shows the simplified subgraph; "Knot within" then works on the simplified subgraph.
 
+## Finding K_5 minors
+Fixed: "Knotted K_5 minor" on 1AOC chain A now finds 19 knotted K_5 minors. I confirmed this by calling the search directly on 1AOC chain A (about 26 s, almost all of it loop analysis). I didn't try it through the app's button.
+
+**Cause:** the old search found K_5 minors one by one, deleting an edge after each hit, and then kept only those containing a knotted loop. On 1AOC it only found 2 minors. The one knotted loop (a 3₁ trefoil, 27 nodes) wasn't in either, so nothing was reported.
+
+**Fix (`graph_algorithms.py`):** I added `enumerate_k5_minors`. It works like the existing knotted K_3,3 search, starting from each knotted loop:
+
+- It only removes edges outside the knotted loop, so every candidate keeps the loop. The graph is cut down until a minor with 5 vertex groups and 10 connecting edges is left.
+- Each candidate is checked for a K_5 minor and duplicates are dropped.
+- `find_knotted_k5_minors` now uses it, with the same time limit and `max_results` options as before.
+
+The plain (non-knotted) "K_5 minor" button is unchanged.
+
 ## Knotted loops vs "Run HOMFLY" button
 
 Knotted loops are detected on the whole loaded graph, that may be the simplified version selected in the "Simplification" dropdown. The result appears in the "Knotted loops" section of the right panel.
