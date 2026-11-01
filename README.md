@@ -82,6 +82,8 @@ The "Advanced" button in the "Find" panel (hidden by default) reveals the origin
 
 Knot results are cached in `knot_cache/<pdbid>/` as `<pdbid>_<chain>_<source>_<within>_<subgraph index>_<nodes>n_<hash>.json`. Each file holds the parameters, the nodes of the analyzed graph, the knotted loops (`loops`) and every analyzed loop with its HOMFLY result (`loops_analyzed`), including the unknotted ones.
 
+`python precompute_cache.py [PDBID[CHAIN] ...] [--methods k33 k5 k33knot k5knot] [--no-subgraphs]` fills this cache for all structures with simplified files (or the given ones): whole-graph knotted loops, the four obstruction families and, for each obstruction, the knotted loops and HOMFLY knot type of the original and simplified subgraph. Already cached results are reused, so it can be restarted.
+
 In the 2D view edges are drawn thick (adjustable with the thickness slider) and the over/under crossing markers follow nodes when you drag them (`assets/crossings.js`); markers whose edges no longer cross are hidden.
 In 2D the thickness slider also scales node circles and labels (square root of the edge factor), and the ◀ ▶ ▲ ▼ ⟲ ⟳ buttons next to "View" turn the whole graph in 15° steps (crossings are recomputed); "Reset" restores the original orientation.
 
