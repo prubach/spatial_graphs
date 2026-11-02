@@ -1,6 +1,5 @@
 """Loading and converting the graph data used by the application."""
 
-import csv
 import os
 
 import networkx as nx
@@ -36,8 +35,8 @@ def list_data_pdbids(data_dir='data'):
         base,ext=os.path.splitext(name)
         if ext.lower() in ('.pdb','.cif'):
             ids.setdefault(base.upper(),set())
-        elif name.endswith('_simplified_bonds.csv'):
-            pid,_,chain=name[:-len('_simplified_bonds.csv')].partition('-')
+        elif name.endswith('_simplified.json'):
+            pid,_,chain=name[:-len('_simplified.json')].partition('-')
             ids.setdefault(pid.upper(),set()).add(chain or 'A')
     return [pid+(chain if chain!='A' else '') for pid,chains in sorted(ids.items()) for chain in sorted(chains or {'A'})]
 
@@ -67,7 +66,7 @@ def merge_residue_nodes(G):
     return M
 def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL,numbering='auth',merge_residues=False):
     """Load a graph for a PDB id using either the topoly bridge extraction or
-    the pre-simplified CSV/JSON pair. Returns (graph, source_label)."""
+    pre-simplified JSON file. Returns (graph, source_label)."""
     pdbid,chain = split_pdbid_chain(pdbid)
     G,label=_load_graph(pdbid,chain,is_topoly,reduce,numbering)
     return (merge_residue_nodes(G) if merge_residues else G),label
@@ -78,55 +77,47 @@ def _load_graph(pdbid,chain,is_topoly,reduce,numbering):
         ext = 'cif' if os.path.exists(f'data/{pdbid.upper()}.cif') else 'pdb'
         return topoly_graph_to_networkx(f'{pdbid.upper()}.{ext}', chain=chain, bridge_type='all', reduce=reduce,
                                         numbering=numbering), 'Topoly'
-    return read_simlified_graph_from_file(f"data/{pdbid.upper()}-{chain}_simplified_bonds.csv",
-                                           f"data/{pdbid.upper()}-{chain}_simplified.json",
+    return read_simlified_graph_from_file(f"data/{pdbid.upper()}-{chain}_simplified.json",
                                            chain=chain), 'Simplified'
 SIMPLIFIED_BOND_TYPES={'disulf':'disulfide','metalc':'ion'}
-def read_simlified_graph_from_file(file_path, node_list_json=None, chain=None):
-    """Read a simplified bonds CSV (+ JSON with atom records). Nodes are atoms named
+def read_simlified_graph_from_file(node_list_json, chain=None):
+    """Read simplified bonds and atom records from JSON. Nodes are atoms named
     <residue>_<atom>, as in topoly_graph_to_networkx; covale bonds are split into
     'side chain' (inside a residue), 'CA' (simplified backbone between residues) and
-    'covalent' (original bond between residues). Also supports mmCIF struct_conn CSVs,
-    whose endpoints are specified by residue and atom identifiers."""
+    'covalent' (original bond between residues)."""
     import json
     G = nx.Graph()
-    atom_list = {}
-    simplified = {}
-    json_bonds = []
-    if node_list_json:
-        with open(node_list_json, 'r') as f:
-            nodes = json.load(f)
-        atom_list = {a['index']: a for a in nodes.get('atoms') or []}
-        json_bonds = nodes.get('bonds') or []
-        simplified = {(b['ptnr1_id'], b['ptnr2_id']): b.get('is_simplified', False)
-                      for b in json_bonds if 'ptnr1_id' in b and 'ptnr2_id' in b}
+    with open(node_list_json, 'r') as f:
+        nodes = json.load(f)
+    atom_list = {a['index']: a for a in nodes.get('atoms') or []}
 
-    def node_of(idx):
+    def node_of(idx, bond, number):
         atom = atom_list.get(idx)
-        if not atom:
-            return str(idx)
-        name = f"{atom.get('auth_residue_id', atom.get('residue_number'))}_{atom['atom']}"
+        if atom:
+            residue = atom.get('auth_residue_id', atom.get('residue_number'))
+            atom_name = atom['atom']
+        else:
+            residue = bond.get(f'ptnr{number}_auth_residue_id')
+            if residue in (None, '', '.'):
+                residue = bond.get(f'ptnr{number}_residue_id')
+            atom_name = bond.get(f'ptnr{number}_atom')
+        name = f"{residue}_{atom_name}" if residue and atom_name else str(idx)
         if not G.has_node(name):
-            G.add_node(name, coords=(atom['x'], atom['y'], atom['z']))
+            coords = (atom['x'], atom['y'], atom['z']) if atom else None
+            G.add_node(name, coords=coords)
         return name
 
-    def residue_atom(auth_chain, auth_residue, label_chain, label_residue, atom_name):
-        for atom in atom_list.values():
-            if atom.get('atom') != atom_name:
-                continue
-            if auth_residue and str(atom.get('auth_residue_id')) == auth_residue \
-                    and (not auth_chain or str(atom.get('auth_chain_id')) == auth_chain):
-                return node_of(atom['index'])
-            if not auth_residue and label_residue and str(atom.get('residue_number')) == label_residue \
-                    and (not label_chain or str(atom.get('chain_id')) == label_chain):
-                return node_of(atom['index'])
-        residue = auth_residue or label_residue
-        name = f"{residue}_{atom_name}"
-        if not G.has_node(name):
-            G.add_node(name)
-        return name
-
-    def add_edge(t, u_id, v_id, is_simplified=True):
+    for bond in nodes.get('bonds') or []:
+        if chain and not any(
+            bond.get(f'ptnr{number}_auth_chain_id') == chain
+            or (not bond.get(f'ptnr{number}_auth_chain_id')
+                and bond.get(f'ptnr{number}_chain_id') == chain)
+            for number in (1, 2)
+        ):
+            continue
+        u_id = node_of(bond['ptnr1_id'], bond, 1)
+        v_id = node_of(bond['ptnr2_id'], bond, 2)
+        t = bond['conn_type']
         if t in SIMPLIFIED_BOND_TYPES:
             t = SIMPLIFIED_BOND_TYPES[t]
         elif t == 'covale':
@@ -134,49 +125,8 @@ def read_simlified_graph_from_file(file_path, node_list_json=None, chain=None):
             if same_residue:
                 t = 'side chain'
             else:
-                t = 'CA' if is_simplified else 'covalent'
+                t = 'CA' if bond.get('is_simplified') else 'covalent'
         G.add_edge(u_id, v_id, type=t, weight=5 if t == 'CA' else 1)
-
-    with open(file_path, 'r') as f:
-        rows = [row for row in csv.reader(f) if row and row[0].strip() and not row[0].startswith('#')]
-
-    if rows and any(column.startswith('_struct_conn.') for column in rows[0]):
-        columns = [column.rsplit('.', 1)[-1] for column in rows[0]]
-        for values in rows[1:]:
-            record = dict(zip(columns, values))
-            if chain and not any(
-                record.get(f'ptnr{number}_auth_asym_id') == chain
-                or (not record.get(f'ptnr{number}_auth_asym_id')
-                    and record.get(f'ptnr{number}_label_asym_id') == chain)
-                for number in (1, 2)
-            ):
-                continue
-            t = record.get('conn_type_id')
-            endpoints = []
-            for number in (1, 2):
-                endpoints.append(residue_atom(
-                    record.get(f'ptnr{number}_auth_asym_id', ''),
-                    record.get(f'ptnr{number}_auth_seq_id', ''),
-                    record.get(f'ptnr{number}_label_asym_id', ''),
-                    record.get(f'ptnr{number}_label_seq_id', ''),
-                    record.get(f'ptnr{number}_label_atom_id', ''),
-                ))
-            add_edge(t, endpoints[0], endpoints[1], is_simplified=False)
-
-        # struct_conn tables contain only original bonds; the JSON also records the
-        # simplified backbone edges needed to reconstruct the complete graph.
-        for bond in json_bonds:
-            if bond.get('is_simplified'):
-                u_id, v_id = node_of(bond['ptnr1_id']), node_of(bond['ptnr2_id'])
-                add_edge(bond['conn_type'], u_id, v_id, is_simplified=True)
-    else:
-        for parts in rows:
-            if len(parts) != 3:
-                continue
-            t, u, v = parts
-            u, v = int(u), int(v)
-            is_simplified = simplified.get((u, v), simplified.get((v, u), True))
-            add_edge(t, node_of(u), node_of(v), is_simplified)
     return G
 def cif_label_to_auth(path, chain):
     """Map label_seq_id -> auth_seq_id for the given label_asym_id chain of an mmCIF file."""

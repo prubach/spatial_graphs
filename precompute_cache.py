@@ -26,7 +26,7 @@ def simplified_ids():
     ids = []
     for pid in list_data_pdbids():
         p, chain = split_pdbid_chain(pid)
-        if os.path.exists(f"data/{p}-{chain}_simplified_bonds.csv"):
+        if os.path.exists(f"data/{p}-{chain}_simplified.json"):
             ids.append(pid)
     return ids
 
