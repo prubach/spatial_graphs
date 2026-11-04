@@ -77,6 +77,7 @@ from graph_visualization import (
     rainbow_backbone_map,
     tube_mesh,
 )
+from wirtinger import external_wirtinger, format_presentation, wirtinger
 from graph_data import (
     SIMPLIFIED_BOND_TYPES,
     TopolyReduce,
@@ -353,6 +354,27 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             return (idx+1)%n
         return (idx-1)%n
 
+    def wirtinger_block(nodes):
+        """Collapsible Gauss code / Wirtinger presentation of a loop, in the external tool's convention (z projection,
+        kinks removed, signs ignored; depends on the loop's start node) and with crossing signs (any projection)."""
+        coords=[state['node_pos_3d'][n] for n in nodes]
+        box={"fontSize":"12px","fontWeight":"400","color":"#37474f","fontFamily":"monospace","overflowWrap":"anywhere",
+             "maxHeight":"200px","overflowY":"auto","display":"block"}
+        parts=[]
+        try:
+            e=external_wirtinger(coords)
+            parts+=[html.Div("External-tool convention (projection along z):",style={"fontWeight":"600"}),
+                    html.Div(f"Gauss code: {e['gauss']}",style=box),html.Div(format_presentation(e),style=box)]
+        except Exception as ex:
+            parts.append(html.Div(f"External-convention presentation failed: {ex}",style={"color":"crimson"}))
+        try:
+            w=wirtinger(coords)
+            parts+=[html.Div(f"With crossing signs ({w['crossings']} crossings in the best projection):",style={"fontWeight":"600"}),
+                    html.Div(f"Gauss code: {w['gauss']}",style=box),html.Div(format_presentation(w),style=box)]
+        except Exception as ex:
+            parts.append(html.Div(f"Signed presentation failed: {ex}",style={"color":"crimson"}))
+        return html.Details([html.Summary("Wirtinger presentation")]+parts,style={"fontSize":"12px"})
+
     def knot_status(idx):
         job=state.get('knot_job')
         if job and job['running']:
@@ -365,7 +387,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         k=loops[idx%len(loops)]
         text=(f"{len(loops)} knotted loop(s) in the whole graph (not limited to a K_5 minor/Kuratowski subgraph) - showing {idx%len(loops)+1}: {k['knot']} "
               f"(P(knot)={k['prob']:.2f}, P(unknot)={k['unknot_prob']:.2f}, {len(k['nodes'])} nodes)")
-        return [text,html.Br(),html.Span(obstruction_summary(k),style={"fontSize":"12px","color":"#1565c0"})]
+        return [text,html.Br(),html.Span(obstruction_summary(k),style={"fontSize":"12px","color":"#1565c0"}),
+                wirtinger_block(k['nodes'])]
 
 
     OBSTRUCTION_FINDERS=(("ogdf","OGDF"),("sage","SageMath"),("k5","K5 minor"))
@@ -606,7 +629,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         knot=k['knot']
         if knot[0] not in "+-":
             knot+=" (achiral or handedness undetermined)"
-        return f"Knot {widx%len(loops)+1} of {len(loops)}: {knot}, P={k['prob']:.2f}{bg}"
+        return [f"Knot {widx%len(loops)+1} of {len(loops)}: {knot}, P={k['prob']:.2f}{bg}",wirtinger_block(k['nodes'])]
 
     @app.callback(Output("within-index","data"),Output("within-version","data"),Output("within-info","children"),
     Output("within-poll","disabled"),
