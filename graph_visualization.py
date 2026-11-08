@@ -14,6 +14,7 @@ def build_elements(graph,pos,obs_nodes=set(),obs_edges=set(),highlight=False,cls
         e={"data":{"id":str(n),"label":str(n)},"position":{"x":pos[n][0]*800,"y":pos[n][1]*800}}
         if highlight and n in obs_nodes: e["classes"]=cls
         if n in knot_nodes: e["classes"]="knotted"
+        if graph.nodes[n].get("k5_bend"): e["classes"]="k5-bend"
         els.append(e)
     for u,v,data in graph.edges(data=True):
         edata={"source":str(u),"target":str(v)}
@@ -156,6 +157,7 @@ KNOT_STYLE=[
 {"selector":"edge.knotted","style":{"background-color":KNOT_COLOR,"line-color":KNOT_COLOR,"width":16}},
 ]
 STYLE=BASE_STYLE+OBSTRUCTION_STYLE+KNOT_STYLE
+STYLE += [{"selector":"node.k5-bend","style":{"label":"","width":1,"height":1,"opacity":0}}]
 GRID_BACKGROUND={
     "backgroundImage":"linear-gradient(to right, #ddd 1px, transparent 1px),"
                        "linear-gradient(to bottom, #ddd 1px, transparent 1px)",
@@ -309,6 +311,8 @@ def build_3d_figure(graph,node_pos,obs_nodes=set(),obs_edges=set(),highlight=Fal
         traces.append(tube_mesh(knot,node_pos,KNOT_COLOR,radius*3))
     node_x,node_y,node_z,node_color,node_text=[],[],[],[],[]
     for n in graph.nodes():
+        if graph.nodes[n].get("k5_bend"):
+            continue
         x,y,z=node_pos[n]
         node_x.append(x); node_y.append(y); node_z.append(z)
         node_color.append(KNOT_COLOR if n in knot_nodes else hl_color if highlight and n in obs_nodes else "#1976d2")

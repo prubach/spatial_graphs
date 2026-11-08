@@ -1,11 +1,11 @@
-"""Fill knot_cache with the K_3,3 / K_5 minor results (plain and knotted) of the 'Simplified' structures.
+"""Fill knot_cache with K_3,3 and legacy/contracted K_5 results of the 'Simplified' structures.
 
 For every structure and chain that has simplified files in data/ this computes, as the app does,
 the whole-graph knotted loops, the four obstruction families (k33, k5, k33knot, k5knot) and for
 each obstruction the knotted loops within it (original and simplified) and its HOMFLY knot type.
 Results already in the cache are reused, so the script can be interrupted and restarted.
 
-Usage: python precompute_cache.py [PDBID[CHAIN] ...] [--methods k33 k5 ...] [--no-subgraphs] [-j JOBS]
+Usage: python precompute_cache.py [PDBID[CHAIN] ...] [--methods k33 k5 k5contracted ...] [--no-subgraphs] [-j JOBS]
 """
 import argparse
 import os
@@ -13,12 +13,13 @@ import sys
 from concurrent.futures import ProcessPoolExecutor
 
 from graph_algorithms import (
-    cached_subgraph_homfly, find_knotted_loops, find_obstructions, simplify_subgraph_topoly, _log,
+    cached_subgraph_homfly, expand_k5_embedding, find_knotted_loops, find_obstructions, simplify_subgraph_topoly, _log,
 )
 from graph_data import TopolyReduce, list_data_pdbids, load_graph_by_id, split_pdbid_chain
 from graph_visualization import get_node_positions_3d
+from k5_precompute import precompute_knotted_k5
 
-METHODS = ("k33", "k5", "k33knot", "k5knot")
+METHODS = ("k33", "k5", "k33knot", "k5knot", "k5contracted", "k5knotcontracted")
 SIMPLIFY_METHOD = "kmt"
 
 
@@ -47,24 +48,30 @@ def _context(pdbid):
 
 
 def find_task(pdbid, method):
-    """Find the obstructions of one family; returns their edge lists."""
+    """Find the obstructions of one family."""
     G, node_pos_3d, params = _context(pdbid)
     _log(f"{pdbid}: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
-    find_knotted_loops(G, node_pos_3d, params=params)
-    kwargs = dict(node_pos_3d=node_pos_3d, params=dict(params)) if method in ("k33knot", "k5knot") else {}
+    if method not in ("k5contracted", "k5knotcontracted"):
+        find_knotted_loops(G, node_pos_3d, params=params)
+    kwargs = dict(node_pos_3d=node_pos_3d, params=dict(params)) if method in ("k33knot", "k5knot", "k5knotcontracted") else {}
+    if method == "k5contracted":
+        kwargs = dict(node_pos_3d=node_pos_3d)
     try:
-        subs = find_obstructions(G, method, **kwargs)
+        subs = precompute_knotted_k5(G, node_pos_3d, params) if method == "k5knotcontracted" \
+            else find_obstructions(G, method, **kwargs)
     except Exception as e:
         _log(f"{pdbid} {method}: failed: {e}")
+        if method == "k5knotcontracted":
+            raise
         return []
     _log(f"{pdbid} {method}: {len(subs)} subgraphs")
-    return [list(sub.edges()) for sub in subs]
+    return subs
 
 
-def subgraph_task(pdbid, method, idx, edges, simplified):
+def subgraph_task(pdbid, method, idx, sub, simplified):
     G, node_pos_3d, params = _context(pdbid)
     try:
-        selected = G.edge_subgraph(edges)
+        selected = expand_k5_embedding(sub) if sub.graph.get('kind') == 'contracted K_5 minor' else G.edge_subgraph(sub.edges())
         shown = simplify_subgraph_topoly(selected, node_pos_3d, method=SIMPLIFY_METHOD) if simplified \
             else selected
         p = dict(params, subgraph_index=idx, simplified=simplified,
@@ -86,9 +93,9 @@ def run(ids, methods, subgraphs, jobs):
         pending = []
         for key, fut in finds.items():
             pdbid, method = key
-            for idx, edges in enumerate(fut.result()):
+            for idx, sub in enumerate(fut.result()):
                 for simplified in (False, True):
-                    pending.append(ex.submit(subgraph_task, pdbid, method, idx, edges, simplified))
+                    pending.append(ex.submit(subgraph_task, pdbid, method, idx, sub, simplified))
         for f in pending:
             f.result()
 

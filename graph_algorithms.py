@@ -191,7 +191,7 @@ def kuratowski_subgraph_type(subgraph):
     if nx.is_isomorphic(core, nx.complete_bipartite_graph(3, 3)):
         return "K_3,3 subdivision (implies a K_3,3 minor)"
     return "unknown Kuratowski type"
-def _find_k5_minor(graph, deadline, seen):
+def _find_k5_minor(graph, deadline, seen, witness=False):
     """Search `graph` for a K_5 minor by exhaustive edge contraction (after removing degree <=1 vertices and
     suppressing degree-2 ones, which preserve K_5 minors). Every reduced vertex keeps the original tree edges
     of its branch set and every reduced edge the original edges of the path realizing it, so a hit can be
@@ -224,6 +224,8 @@ def _find_k5_minor(graph, deadline, seen):
         if n_v < 5 or sum(map(len, adj.values())) < 20:
             return None
         if n_v == 5:
+            if witness and all(len(nb) == 4 for nb in adj.values()):
+                return adj, {n: tree[n] for n in adj}
             return [e for u in adj for v in adj[u] if u < v for e in adj[u][v]] + [e for t in tree.values() for e in t] \
                 if all(len(nb) == 4 for nb in adj.values()) else None
         key = frozenset(frozenset((u, v)) for u in adj for v in adj[u])
@@ -249,6 +251,173 @@ def _find_k5_minor(graph, deadline, seen):
         return None
 
     return rec(adj, tree)
+
+
+def _contracted_k5(graph, witness, node_pos_3d=None):
+    """Build a K5 with polyline edges from a contraction witness.
+
+    Branch vertices are represented by their surviving original vertex. An incident
+    edge is moved to that vertex by replacing its endpoint; its remaining path
+    vertices retain their original positions.
+    """
+    adj, trees = witness
+    positions = node_pos_3d
+    if positions is None and any(graph.nodes[n].get('coords') is None for n in graph):
+        positions = nx.spring_layout(graph, dim=3, seed=1)
+
+    def coords(node):
+        value = positions.get(node) if positions is not None else graph.nodes[node].get('coords')
+        if value is None or len(value) != 3:
+            raise ValueError(f"Missing 3D coordinates for K_5 vertex {node}")
+        return [float(x) for x in value]
+
+    roots = list(adj)
+    branches = {}
+    for root in roots:
+        tree = nx.Graph()
+        tree.add_node(root)
+        tree.add_edges_from(trees[root])
+        branches[root] = set(tree)
+    result = nx.Graph(kind='contracted K_5 minor', contraction='endpoint replacement')
+    for root in roots:
+        result.add_node(root, coords=coords(root),
+                        branch_set=list(branches[root]))
+    source_edges = set()
+    for root in roots:
+        source_edges.update(frozenset(e) for e in trees[root])
+    for i, u in enumerate(roots):
+        for v in roots[i + 1:]:
+            path_graph = nx.Graph()
+            path_graph.add_edges_from(adj[u][v])
+            starts = branches[u] & set(path_graph)
+            ends = branches[v] & set(path_graph)
+            paths = [nx.shortest_path(path_graph, a, b) for a in sorted(starts, key=str) for b in sorted(ends, key=str)
+                     if nx.has_path(path_graph, a, b)]
+            if not paths:
+                raise ValueError("Invalid K_5 contraction witness: missing connecting path")
+            path = min(paths, key=len)
+            points = [coords(n) for n in path[1:-1]]
+            original_edges = list(zip(path, path[1:]))
+            source_edges.update(frozenset(e) for e in original_edges)
+            result.add_edge(u, v, points=points, source_edges=original_edges)
+    result.graph['source_edges'] = sorted((tuple(sorted(e, key=str)) for e in source_edges),
+                                          key=lambda e: tuple(map(str, e)))
+    return result
+
+
+def expand_k5_embedding(graph):
+    """Expand edge polylines into unlabelled degree-2 points for analysis and drawing."""
+    if graph.graph.get('kind') != 'contracted K_5 minor' or graph.graph.get('k5_expanded'):
+        return graph
+    expanded = nx.Graph(**graph.graph)
+    expanded.graph['strict_homfly'] = True
+    expanded.graph['k5_expanded'] = True
+    expanded.add_nodes_from((n, dict(data)) for n, data in graph.nodes(data=True))
+    for edge_index, (u, v, data) in enumerate(graph.edges(data=True)):
+        path = [u]
+        for i, point in enumerate(data.get('points', [])):
+            node = ('__k5_bend__', edge_index, i)
+            if node in graph:
+                raise ValueError("K_5 bend identifier conflicts with a graph vertex")
+            expanded.add_node(node, coords=point, k5_bend=True)
+            path.append(node)
+        path.append(v)
+        for a, b in zip(path, path[1:]):
+            expanded.add_edge(a, b, source_edges=data.get('source_edges', []))
+    return expanded
+
+
+def validate_k5_embedding(graph):
+    """Reject collapsed or intersecting polygonal edges, which do not define an embedding."""
+    import numpy as np
+    expanded = expand_k5_embedding(graph)
+    hubs = {n for n in expanded if expanded.degree(n) == 4}
+    if (len(hubs) != 5 or any(expanded.degree(n) not in (2, 4) for n in expanded)
+            or not nx.is_connected(expanded)):
+        raise ValueError("Contracted embedding is not a subdivision of K_5")
+    core = nx.Graph()
+    core.add_nodes_from(hubs)
+    for hub in hubs:
+        for neighbor in expanded.neighbors(hub):
+            previous, current = hub, neighbor
+            visited = {hub}
+            while current not in hubs:
+                if current in visited:
+                    raise ValueError("Contracted embedding contains a closed edge path")
+                visited.add(current)
+                previous, current = current, next(n for n in expanded.neighbors(current) if n != previous)
+            if current == hub:
+                raise ValueError("Contracted embedding contains a loop")
+            core.add_edge(hub, current)
+    if core.number_of_edges() != 10:
+        raise ValueError("Contracted embedding is not a subdivision of K_5")
+    segments = [(u, v, np.asarray(expanded.nodes[u]['coords'], dtype=float),
+                 np.asarray(expanded.nodes[v]['coords'], dtype=float))
+                for u, v in expanded.edges()]
+    coords = np.array([expanded.nodes[n]['coords'] for n in expanded], dtype=float)
+    if not np.isfinite(coords).all():
+        raise ValueError("K_5 embedding has non-finite coordinates")
+    tolerance = max(float(np.ptp(coords, axis=0).max()), 1.0) * 1e-8
+    for i, (u, v, p, q) in enumerate(segments):
+        d = q - p
+        a = float(d @ d)
+        if a <= tolerance ** 2:
+            raise ValueError("K_5 contraction produced a zero-length edge segment")
+        for x, y, r, s in segments[:i]:
+            e = s - r
+            c = float(e @ e)
+            if c <= tolerance ** 2:
+                raise ValueError("K_5 contraction produced a zero-length edge segment")
+            shared = {u, v} & {x, y}
+            if shared:
+                common = next(iter(shared))
+                p0 = np.asarray(expanded.nodes[common]['coords'], dtype=float)
+                a1 = (q if u == common else p) - p0
+                a2 = (s if x == common else r) - p0
+                if np.linalg.norm(np.cross(a1, a2)) <= tolerance * max(np.linalg.norm(a1), np.linalg.norm(a2)) and a1 @ a2 > 0:
+                    raise ValueError("K_5 contraction produced overlapping edge segments")
+                continue
+            # Closest points on two closed segments, including parallel cases.
+            w = p - r
+            b, d0, e0 = float(d @ e), float(d @ w), float(e @ w)
+            denom = a * c - b * b
+            candidates = [(0.0, max(0.0, min(1.0, e0 / c))),
+                          (1.0, max(0.0, min(1.0, (e0 + b) / c))),
+                          (max(0.0, min(1.0, -d0 / a)), 0.0),
+                          (max(0.0, min(1.0, (b - d0) / a)), 1.0)]
+            if denom > 1e-15 * a * c:
+                t, z = (b * e0 - c * d0) / denom, (a * e0 - b * d0) / denom
+                if 0 <= t <= 1 and 0 <= z <= 1:
+                    candidates.append((t, z))
+            if min(np.linalg.norm(w + t * d - z * e) for t, z in candidates) <= tolerance:
+                raise ValueError("K_5 contraction produced intersecting edge segments")
+
+
+def find_contracted_k5_minors(graph, node_pos_3d=None, max_results=20, time_limit=60):
+    """Find contracted K5 embeddings using the existing edge-deletion search."""
+    work = nx.Graph(graph)
+    deadline = time.monotonic() + time_limit
+    results = []
+    try:
+        while max_results is None or len(results) < max_results:
+            hit = None
+            for comp in nx.biconnected_components(work):
+                if len(comp) >= 5:
+                    hit = _find_k5_minor(work.subgraph(comp), deadline, set(), witness=True)
+                    if hit:
+                        break
+            if not hit:
+                break
+            model = _contracted_k5(graph, hit, node_pos_3d)
+            validate_k5_embedding(model)
+            results.append(model)
+            source_edges = model.graph['source_edges']
+            if not source_edges:
+                raise ValueError("K_5 contraction witness has no original edges")
+            work.remove_edge(*source_edges[0])
+    except TimeoutError as e:
+        raise TimeoutError(f'Contracted K_5 search timed out after {time_limit}s; results are incomplete') from e
+    return results
 def find_k5_minors(graph, max_results=20, time_limit=60):
     """Return up to `max_results` subgraphs, each a K_5 minor model (5 connected branch sets plus the 10 edges
     joining them). After each hit one edge of the model is deleted so the next search finds a different one."""
@@ -396,7 +565,7 @@ def find_knotted_k33_subgraphs(graph, node_pos_3d=None, params=None, limit=100):
                 sg.graph['sources'] = ['knotted loop']
                 found[ek] = sg
     return sorted(found.values(), key=lambda g: (g.number_of_nodes(), sorted(map(str, g.nodes()))))[:limit]
-def enumerate_k5_minors(graph, must_contain=None, limit=1000, deadline=None):
+def _iter_k5_minors(graph, must_contain=None, limit=1000, deadline=None, strict=False):
     """All minimal K_5 minor models of `graph` (5 branch trees plus the 10 joining edges; cyclomatic number 6)
     that contain every edge of `must_contain`. Each biconnected component is reduced to its core (chains of
     degree-2 nodes become single edges); a model is what is left after deleting cyclomatic-6 core edges and
@@ -404,7 +573,7 @@ def enumerate_k5_minors(graph, must_contain=None, limit=1000, deadline=None):
     from itertools import combinations
     from math import comb
     required = {frozenset(e) for e in (must_contain or ())}
-    results, unique = [], set()
+    count, unique = 0, set()
     for block in nx.biconnected_components(graph):
         if len(block) < 5:
             continue
@@ -458,16 +627,56 @@ def enumerate_k5_minors(graph, must_contain=None, limit=1000, deadline=None):
                 continue
             unique.add(ek)
             try:
-                hit = _find_k5_minor(sg, time.monotonic() + 60, set())
+                hit = _find_k5_minor(sg, min(deadline, time.monotonic() + 60) if deadline else time.monotonic() + 60, set())
             except TimeoutError:
+                if strict or (deadline is not None and time.monotonic() >= deadline):
+                    raise
                 continue
             if not hit:
                 continue
             sg.graph['kind'] = 'K_5 minor'
-            results.append(sg)
-            if len(results) >= limit:
-                return results
-    return results
+            yield sg
+            count += 1
+            if limit is not None and count >= limit:
+                return
+
+
+def enumerate_k5_minors(graph, must_contain=None, limit=1000, deadline=None):
+    return list(_iter_k5_minors(graph, must_contain, limit, deadline))
+
+
+def find_contracted_knotted_k5_minors(graph, node_pos_3d=None, params=None,
+                                     max_results=None, time_limit=120, candidate_limit=1000):
+    """Find knotted contracted embeddings among the enumerated minor models."""
+    from k5_precompute import load_precomputed
+    cached = load_precomputed(graph, node_pos_3d, candidate_limit)
+    if cached is not None:
+        return cached if max_results is None else cached[:max(0, max_results)]
+    deadline = time.monotonic() + time_limit
+    found = []
+    if (max_results is not None and max_results <= 0) or (candidate_limit is not None and candidate_limit <= 0):
+        return found
+    try:
+        for model in _iter_k5_minors(graph, limit=candidate_limit, deadline=deadline, strict=True):
+            witness = _find_k5_minor(model, deadline, set(), witness=True)
+            if not witness:
+                continue
+            contracted = _contracted_k5(graph, witness, node_pos_3d)
+            validate_k5_embedding(contracted)
+            expanded = expand_k5_embedding(contracted)
+            loops = find_knotted_loops(expanded, node_pos_3d,
+                                       params=dict(params or {}, within='k5knotcontracted'))
+            if loops:
+                contracted.graph['sources'] = ['knotted contracted embedding']
+                contracted.graph['knotted_loops'] = loops
+                found.append(contracted)
+                if max_results is not None and len(found) >= max_results:
+                    break
+            if time.monotonic() > deadline:
+                raise TimeoutError
+    except TimeoutError as e:
+        raise TimeoutError(f'Contracted knotted K_5 search timed out after {time_limit}s; results are incomplete') from e
+    return found
 def find_knotted_k5_minors(graph, node_pos_3d=None, params=None, max_results=None, time_limit=120):
     """K_5 minor models that contain a knotted loop of `graph`.
     The models are enumerated from the knotted loops (a model is knotted when one of its cycles is),
@@ -532,10 +741,14 @@ def find_obstructions(graph, method="ogdf", **kwargs):
         return find_k33_subgraphs(graph)
     if method == "k5":
         return find_k5_minors(graph)
+    if method == "k5contracted":
+        return find_contracted_k5_minors(graph, **kwargs)
     if method == "k33knot":
         return find_knotted_k33_subgraphs(graph, **kwargs)
     if method == "k5knot":
         return find_knotted_k5_minors(graph, **kwargs)
+    if method == "k5knotcontracted":
+        return find_contracted_knotted_k5_minors(graph, **kwargs)
     if method == "sage":
         return find_multiple_kuratowski_subgraphs_sage(graph)
     return find_multiple_kuratowski_subgraphs_ogdf(graph)
@@ -611,7 +824,7 @@ def simplify_subgraph_topoly(selected_graph, node_pos_3d=None, method='kmt'):
     except Exception:
         return selected_graph.copy()
 
-    simp_g = nx.Graph()
+    simp_g = nx.Graph(**selected_graph.graph)
     for n in selected_graph.nodes():
         idx = node_to_id[n]
         if idx in tp_g.coordinates:
@@ -621,6 +834,7 @@ def simplify_subgraph_topoly(selected_graph, node_pos_3d=None, method='kmt'):
             if c is None:
                 c = tuple(tp_g.coordinates[idx])
             simp_g.add_node(n, coords=c)
+            simp_g.nodes[n].update({k: v for k, v in selected_graph.nodes[n].items() if k != 'coords'})
 
     for arc in tp_g.arcs:
         for i in range(len(arc) - 1):
@@ -751,12 +965,14 @@ def _knot_cache_path(graph, node_pos_3d, tries, kind='', params=None):
     differ only in e.g. simplification still get distinct files."""
     import hashlib
     params = params or {}
-    h = hashlib.sha256(f'v4-closed|{tries}|{kind}'.encode())
+    version = 'v6-contracted-closed' if graph.graph.get('strict_homfly') else 'v4-closed'
+    h = hashlib.sha256(f'{version}|{tries}|{kind}'.encode())
     for n in sorted(graph.nodes(), key=str):
         c = graph.nodes[n].get('coords')
         if c is None and node_pos_3d is not None:
             c = node_pos_3d.get(n)
-        h.update(f'{n}:{None if c is None else [round(float(x), 4) for x in c]};'.encode())
+        values = None if c is None else [float(x) if graph.graph.get('strict_homfly') else round(float(x), 4) for x in c]
+        h.update(f'{n}:{values};'.encode())
     for e in sorted(tuple(sorted((str(u), str(v)))) for u, v in graph.edges()):
         h.update(f'{e};'.encode())
     within = params.get('within') or kind or 'whole'
@@ -833,6 +1049,9 @@ def find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, params=
     return loops
 def cached_subgraph_homfly(subgraph, node_pos_3d=None, tries=500, params=None):
     """File-cached test_obstruction_knot_homfly; failed/timed-out runs (knot_type None) are not cached."""
+    if subgraph.graph.get('strict_homfly'):
+        loops = find_knotted_loops(subgraph, node_pos_3d, tries=tries, params=params)
+        return (loops[0]['knot'], loops[0]['prob']) if loops else ('0_1', 1.0)
     import json
     path = _knot_cache_path(subgraph, node_pos_3d, tries, kind='subgraph', params=params)
     try:
@@ -913,8 +1132,12 @@ def _find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, analyz
         key = loop_key(names)
         cached = key in done
         res = done[key] if cached else _isolated_homfly(coords, tries)
+        if (not res or not any(k != 'TMC' for k in res)) and graph.graph.get('strict_homfly'):
+            raise RuntimeError("HOMFLY failed for a cycle of the contracted K_5")
         loop_nodes = [id_to_node[i] for i in ids]
         verdict = classify_homfly(res)
+        if graph.graph.get('strict_homfly') and verdict is None and float(res.get('0_1', 0.0)) < 0.5:
+            raise RuntimeError("HOMFLY was inconclusive for a cycle of the contracted K_5")
         with lock:
             if analyzed is not None:
                 analyzed.append(dict(nodes=loop_nodes, homfly=res, knotted=verdict is not None))
