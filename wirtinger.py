@@ -126,12 +126,12 @@ def _drop_kinks(ev, iterative):
             return ev
 
 
-def external_wirtinger(coords, iterative=True):
+def external_wirtinger(coords, iterative=True, extended=False):
     """Gauss code and Wirtinger presentation as produced by the external tool whose reports are in GaussCode/:
     projection along the z axis (higher z = over), crossings numbered by first appearance before Reidemeister I
     kinks are removed (so numbers may have gaps), arc k = k-1 under-passes passed (arc after the last under = 1),
-    relations listed in under-pass order, always in the form x_o x_in x_o^{-1} x_out^{-1} = 1 (crossing signs ignored,
-    so the relations are only valid for knots whose crossings all have the same sign)."""
+    relations listed in under-pass order. By default crossing signs are ignored. With `extended=True`,
+    return the external a/b over/under codes and crossing signs, with signed relations."""
     cr = _crossings(np.asarray(coords, dtype=float), np.array([0.0, 0.0, 1.0]))
     if cr is None:
         raise ValueError("degenerate projection along z")
@@ -140,7 +140,11 @@ def external_wirtinger(coords, iterative=True):
     for _, k, _ in ev:
         label.setdefault(k, len(label) + 1)
     ev = _drop_kinks(ev, iterative)
-    gauss = [label[k] if o else -label[k] for _, k, o in ev]
+    if extended:
+        gauss = [f"{'a' if o else 'b'}{label[k]}{'+' if cr[k][3] * (1 if o else -1) > 0 else '-'}"
+                 for _, k, o in ev]
+    else:
+        gauss = [label[k] if o else -label[k] for _, k, o in ev]
     n = sum(1 for e in ev if not e[2])
     if n == 0:
         return dict(gauss=[], crossings=0, generators=1, relations=[], signs=[])
@@ -151,7 +155,7 @@ def external_wirtinger(coords, iterative=True):
         else:
             seen += 1
             rels.append([k, seen, seen % n + 1])
-    rels = [(arc_over[k], i, out, -1) for k, i, out in rels]
+    rels = [(arc_over[k], i, out, cr[k][3] if extended else -1) for k, i, out in rels]
     return dict(gauss=gauss, crossings=len(ev) // 2, generators=n, relations=rels, signs=[])
 
 

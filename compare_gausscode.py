@@ -59,7 +59,7 @@ def parse_report(path):
     return cycles, count, records
 
 
-def compare_presentations(pdb, chain, records):
+def compare_presentations(pdb, chain, records, extended=False):
     """Recompute Gauss code / Wirtinger presentation with the external tool's conventions
     (see wirtinger.external_wirtinger) from the same node order and compare with the report."""
     from wirtinger import external_wirtinger, format_relation
@@ -70,7 +70,7 @@ def compare_presentations(pdb, chain, records):
     bad = []
     for nodes, gauss, wirt in records:
         try:
-            r = external_wirtinger([pos[n] for n in nodes])
+            r = external_wirtinger([pos[n] for n in nodes], extended=extended)
         except (KeyError, ValueError):
             bad.append(nodes)
             continue
@@ -83,7 +83,7 @@ def compare_presentations(pdb, chain, records):
     examples = []
     for nodes, gauss, wirt in records:
         if gauss != "[]" and len(examples) < 2:
-            r = external_wirtinger([pos[n] for n in nodes])
+            r = external_wirtinger([pos[n] for n in nodes], extended=extended)
             examples.append((len(nodes), gauss, wirt, str(r["gauss"]),
                              ",  ".join(format_relation(x) for x in r["relations"])))
     return len(records), same_g, same_w, bad, examples
@@ -176,63 +176,70 @@ def main():
 
     rows, details, pres, subgraph_rows = [], [], {}, []
     methods = ("k33", "k5", "k33knot", "k5knot", "k5contracted", "k5knotcontracted")
-    for path in sorted(glob.glob("GaussCode/*_simple_cycles_with_gauss_report.txt")):
+    paths = sorted(glob.glob("GaussCode/*_simple_cycles_with_gauss_report.txt")
+                   + glob.glob("GaussCode/*_simple_cycles_with_ext_gauss_report.txt"))
+    for path in paths:
         pdb, chain = os.path.basename(path).split("_")[0].split("-")
+        extended = path.endswith("_simple_cycles_with_ext_gauss_report.txt")
+        structure = f"{pdb}-{chain} (extended)" if extended else f"{pdb}-{chain}"
         ext, ext_count, records = parse_report(path)
-        pres[(pdb, chain)] = compare_presentations(pdb, chain, records)
+        pres[structure] = compare_presentations(pdb, chain, records, extended=extended)
         cached = load_cache(pdb, chain)
         if cached is None:
-            rows.append((pdb, chain, ext_count, len(ext), None))
-            continue
-        cfile, d = cached
-        app = {}
-        for loop in d["loops_analyzed"]:
-            app[cycle_key(loop["nodes"])] = bool(loop.get("knotted"))
-        # loops reported as knotted but absent from loops_analyzed
-        for loop in d.get("loops", []):
-            app.setdefault(cycle_key(loop["nodes"]), True)
+            import networkx as nx
+            from graph_data import load_graph_by_id
+            graph, _ = load_graph_by_id(pdb + chain, False)
+            app = {cycle_key(cycle): None for cycle in nx.simple_cycles(graph) if len(cycle) >= 3}
+            cfile = None
+        else:
+            cfile, d = cached
+            app = {}
+            for loop in d["loops_analyzed"]:
+                app[cycle_key(loop["nodes"])] = bool(loop.get("knotted"))
+            # loops reported as knotted but absent from loops_analyzed
+            for loop in d.get("loops", []):
+                app.setdefault(cycle_key(loop["nodes"]), True)
         common = ext.keys() & app.keys()
         only_ext, only_app = ext.keys() - app.keys(), app.keys() - ext.keys()
-        tab = Counter((ext[k], app[k]) for k in common)
-        rows.append((pdb, chain, ext_count, len(ext), (len(app), len(common), len(only_ext), len(only_app), tab,
-                                                        os.path.basename(cfile))))
-        details.append((pdb, chain, only_ext, only_app))
-        if args.include_subgraphs:
+        tab = Counter((ext[k], app[k]) for k in common) if cached else None
+        rows.append((structure, ext_count, len(ext), (len(app), len(common), len(only_ext), len(only_app), tab,
+                                                     os.path.basename(cfile) if cfile else None)))
+        details.append((structure, only_ext, only_app))
+        if args.include_subgraphs and cached:
             for method in methods:
                 print(f"Running {method} subgraph identification for {pdb}-{chain}...", flush=True)
                 try:
                     subgraphs = run_subgraph_finder(pdb, chain, method)
                 except TimeoutError as e:
-                    subgraph_rows.append((pdb, chain, method, None, None, None, None, f"incomplete: {e}"))
+                    subgraph_rows.append((structure, method, None, None, None, None, f"incomplete: {e}"))
                     continue
                 covered = set()
                 for edges in subgraphs:
                     covered.update(cycle for cycle in ext if cycle <= edges)
-                subgraph_rows.append((pdb, chain, method, len(subgraphs), len(covered),
+                subgraph_rows.append((structure, method, len(subgraphs), len(covered),
                                       sum(ext[c] for c in covered),
                                       sum(app.get(c, False) for c in covered), "complete"))
 
     out = ["# Cycle comparison: external Gauss-code tool vs. this app", "",
-           "Cycles are compared as undirected edge sets. App cycles come from the whole-graph results in `knot_cache/`.", "",
+           "Cycles are compared as undirected edge sets. App cycles come from whole-graph results in `knot_cache/`; "
+           "when no cache exists, cycles are enumerated directly without HOMFLY classification.", "",
            "| Structure | Ext. cycles (unique) | App cycles | Common | Only external | Only app | Match |",
            "|---|---|---|---|---|---|---|"]
-    for pdb, chain, ec, eu, r in rows:
-        if r is None:
-            out.append(f"| {pdb}-{chain} | {ec} ({eu}) | no cache | - | - | - | - |")
-            continue
+    for structure, ec, eu, r in rows:
         na, nc, oe, oa, _, _ = r
-        out.append(f"| {pdb}-{chain} | {ec} ({eu}) | {na} | {nc} | {oe} | {oa} | "
+        out.append(f"| {structure} | {ec} ({eu}) | {na} | {nc} | {oe} | {oa} | "
                    f"{'identical' if oe == 0 and oa == 0 else f'{100 * nc / max(eu, na):.1f}%'} |")
 
     out += ["", "## Knottedness on common cycles", "",
             "App flag = HOMFLY says knotted; External flag = non-empty Gauss code (crossings present).", "",
             "| Structure | both knotted/crossing | app knotted, ext empty | app unknot, ext crossings | both trivial |",
             "|---|---|---|---|---|"]
-    for pdb, chain, _, _, r in rows:
-        if r is None:
+    for structure, _, _, r in rows:
+        if r[4] is None:
+            out.append(f"| {structure} | unavailable (no HOMFLY cache) | - | - | - |")
             continue
         t = r[4]
-        out.append(f"| {pdb}-{chain} | {t[(True, True)]} | {t[(False, True)]} | {t[(True, False)]} | {t[(False, False)]} |")
+        out.append(f"| {structure} | {t[(True, True)]} | {t[(False, True)]} | {t[(True, False)]} | {t[(False, False)]} |")
     out += ["", "\"app unknot, ext crossings\" is expected (unknots drawn with kinks). "
             "\"app knotted, ext empty\" would indicate a real disagreement.", ""]
 
@@ -244,32 +251,33 @@ def main():
                 "marked incomplete rather than reported as zero results.", "",
                 "| Structure | Method | Identified subgraphs | GaussCode cycles covered | Covered cycles with crossings | Covered app-knotted cycles | Status |",
                 "|---|---|---:|---:|---:|---:|---|"]
-        for pdb, chain, method, n_subgraphs, n_covered, n_crossing, n_knotted, status in subgraph_rows:
+        for structure, method, n_subgraphs, n_covered, n_crossing, n_knotted, status in subgraph_rows:
             if status != "complete":
-                out.append(f"| {pdb}-{chain} | {method} | - | - | - | - | {status.replace('|', '/')} |")
+                out.append(f"| {structure} | {method} | - | - | - | - | {status.replace('|', '/')} |")
             else:
-                out.append(f"| {pdb}-{chain} | {method} | {n_subgraphs} | {n_covered} | {n_crossing} | "
+                out.append(f"| {structure} | {method} | {n_subgraphs} | {n_covered} | {n_crossing} | "
                            f"{n_knotted} | complete |")
         out.append("")
 
     out += ["## Gauss code and Wirtinger presentation (same projection)", "",
             "Coordinates come from the atoms in `data/<id>-<chain>_simplified.json` (the bonds CSV files are not used). Recomputed by `wirtinger.external_wirtinger` (projection along z, higher z over, Reidemeister I kinks "
-            "removed, crossing signs ignored) from each cycle's node order in the external report.", "",
+            "removed) from each cycle's node order in the external report. Legacy reports ignore crossing signs; "
+            "extended reports include over/under and crossing signs.", "",
             "| Structure | Cycles | Identical Gauss code | Identical Wirtinger presentation | Not reproduced |",
             "|---|---|---|---|---|"]
-    for (pdb, chain), (n, g, w, bad, _) in pres.items():
-        out.append(f"| {pdb}-{chain} | {n} | {g} | {w} | {len(bad)} |")
+    for structure, (n, g, w, bad, _) in pres.items():
+        out.append(f"| {structure} | {n} | {g} | {w} | {len(bad)} |")
     out.append("")
     out += ["### Examples (external report vs. recomputed by the app)", ""]
-    for (pdb, chain), (_, _, _, _, ex) in pres.items():
+    for structure, (_, _, _, _, ex) in pres.items():
         for nn_, g1, w1, g2, w2 in ex:
-            out += [f"**{pdb}-{chain}**, cycle of {nn_} nodes", "",
+            out += [f"**{structure}**, cycle of {nn_} nodes", "",
                     f"- External Gauss code: `{g1}`", f"- App Gauss code: `{g2}`",
                     f"- External Wirtinger: `{w1}`", f"- App Wirtinger: `{w2}`", ""]
 
-    for pdb, chain, oe, oa in details:
+    for structure, oe, oa in details:
         if oe or oa:
-            out += [f"## {pdb}-{chain}: differing cycles (up to 5 each)", ""]
+            out += [f"## {structure}: differing cycles (up to 5 each)", ""]
             for label, s in (("Only external", oe), ("Only app", oa)):
                 for k in sorted(s, key=len)[:5]:
                     nodes = sorted({n for e in k for n in e})
