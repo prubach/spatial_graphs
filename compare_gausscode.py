@@ -6,16 +6,20 @@ Cycles are compared as sets of undirected edges. For cycles present in both, the
 HOMFLY-based "knotted" flag. A non-empty Gauss code does not imply a knot (it may be an unknot with
 kinks), so only "knotted but empty Gauss code" is a genuine inconsistency.
 
-Usage: python compare_gausscode.py [-o REPORT.md]
+Usage: python compare_gausscode.py [-o REPORT.md] [--include-subgraphs]
 """
 import argparse
 import glob
 import json
+import multiprocessing
 import os
 import re
 from collections import Counter
+from queue import Empty
 
 NODE = re.compile(r"^[A-Za-z0-9]*?(-?\d+[A-Za-z]?):(\w+)$")
+SUBGRAPH_SEARCH_TIMEOUT = 120
+TIME_BOUNDED_METHODS = {"k33knot", "k5knot", "k5knotcontracted"}
 
 
 def node_name(token):
@@ -97,12 +101,81 @@ def load_cache(pdb, chain):
     return best
 
 
+def identify_subgraphs(pdb, chain, method):
+    """Run a current obstruction finder and return each result's edge set."""
+    from graph_algorithms import expand_k5_embedding, find_obstructions
+    from graph_data import TopolyReduce, load_graph_by_id
+    from graph_visualization import get_node_positions_3d
+
+    graph, _ = load_graph_by_id(pdb + chain, False)
+    positions = get_node_positions_3d(graph)
+    params = dict(pdbid=pdb, chain=chain, source="simplified",
+                  reduce=str(TopolyReduce.INTERNAL), numbering="auth", merge_residues=False)
+    if method in TIME_BOUNDED_METHODS:
+        kwargs = dict(node_pos_3d=positions, params=params)
+        if method == "k5knot":
+            kwargs.update(time_limit=SUBGRAPH_SEARCH_TIMEOUT - 1, raise_on_timeout=True)
+        elif method == "k5knotcontracted":
+            kwargs["time_limit"] = SUBGRAPH_SEARCH_TIMEOUT - 1
+    elif method == "k5contracted":
+        kwargs = dict(node_pos_3d=positions)
+    else:
+        kwargs = {}
+    subgraphs = find_obstructions(graph, method, **kwargs)
+    return [frozenset(frozenset(edge) for edge in
+                      (expand_k5_embedding(sub) if sub.graph.get("kind") == "contracted K_5 minor"
+                       else sub).edges())
+            for sub in subgraphs]
+
+
+def _subgraph_worker(pdb, chain, method, result_queue):
+    try:
+        result_queue.put((True, identify_subgraphs(pdb, chain, method)))
+    except TimeoutError as error:
+        result_queue.put(("timeout", str(error)))
+    except Exception as error:
+        result_queue.put((False, type(error).__name__, str(error)))
+
+
+def run_subgraph_finder(pdb, chain, method):
+    """Bound knotted searches and distinguish timeout from an empty result."""
+    if method not in TIME_BOUNDED_METHODS:
+        return identify_subgraphs(pdb, chain, method)
+
+    context = multiprocessing.get_context("fork")
+    result_queue = context.Queue()
+    process = context.Process(target=_subgraph_worker, args=(pdb, chain, method, result_queue))
+    process.start()
+    process.join(SUBGRAPH_SEARCH_TIMEOUT)
+    if process.is_alive():
+        process.terminate()
+        process.join()
+        result_queue.close()
+        raise TimeoutError(f"{method} search exceeded {SUBGRAPH_SEARCH_TIMEOUT}s")
+    try:
+        result = result_queue.get(timeout=1)
+    except Empty as error:
+        result_queue.close()
+        raise RuntimeError(f"{method} search exited without returning results "
+                           f"(exit code {process.exitcode})") from error
+    finally:
+        result_queue.close()
+    if result[0] == "timeout":
+        raise TimeoutError(result[1])
+    if not result[0]:
+        raise RuntimeError(f"{method} search failed: {result[1]}: {result[2]}")
+    return result[1]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-o", "--output", default="GaussCode/comparison_report.md")
+    ap.add_argument("--include-subgraphs", action="store_true",
+                    help="run all current subgraph identification methods and compare their edge coverage")
     args = ap.parse_args()
 
-    rows, details, pres = [], [], {}
+    rows, details, pres, subgraph_rows = [], [], {}, []
+    methods = ("k33", "k5", "k33knot", "k5knot", "k5contracted", "k5knotcontracted")
     for path in sorted(glob.glob("GaussCode/*_simple_cycles_with_gauss_report.txt")):
         pdb, chain = os.path.basename(path).split("_")[0].split("-")
         ext, ext_count, records = parse_report(path)
@@ -124,6 +197,20 @@ def main():
         rows.append((pdb, chain, ext_count, len(ext), (len(app), len(common), len(only_ext), len(only_app), tab,
                                                         os.path.basename(cfile))))
         details.append((pdb, chain, only_ext, only_app))
+        if args.include_subgraphs:
+            for method in methods:
+                print(f"Running {method} subgraph identification for {pdb}-{chain}...", flush=True)
+                try:
+                    subgraphs = run_subgraph_finder(pdb, chain, method)
+                except TimeoutError as e:
+                    subgraph_rows.append((pdb, chain, method, None, None, None, None, f"incomplete: {e}"))
+                    continue
+                covered = set()
+                for edges in subgraphs:
+                    covered.update(cycle for cycle in ext if cycle <= edges)
+                subgraph_rows.append((pdb, chain, method, len(subgraphs), len(covered),
+                                      sum(ext[c] for c in covered),
+                                      sum(app.get(c, False) for c in covered), "complete"))
 
     out = ["# Cycle comparison: external Gauss-code tool vs. this app", "",
            "Cycles are compared as undirected edge sets. App cycles come from the whole-graph results in `knot_cache/`.", "",
@@ -148,6 +235,22 @@ def main():
         out.append(f"| {pdb}-{chain} | {t[(True, True)]} | {t[(False, True)]} | {t[(True, False)]} | {t[(False, False)]} |")
     out += ["", "\"app unknot, ext crossings\" is expected (unknots drawn with kinks). "
             "\"app knotted, ext empty\" would indicate a real disagreement.", ""]
+
+    if args.include_subgraphs:
+        out += ["## Current subgraph identification algorithms", "",
+                "A GaussCode cycle is counted as covered when all of its edges occur together in at least one identified subgraph. "
+                "This measures containment, not equality between a cycle and a subgraph. Contracted K_5 embeddings are expanded "
+                "before comparing edges. Knotted-subgraph searches are limited to 120 seconds; searches that time out are "
+                "marked incomplete rather than reported as zero results.", "",
+                "| Structure | Method | Identified subgraphs | GaussCode cycles covered | Covered cycles with crossings | Covered app-knotted cycles | Status |",
+                "|---|---|---:|---:|---:|---:|---|"]
+        for pdb, chain, method, n_subgraphs, n_covered, n_crossing, n_knotted, status in subgraph_rows:
+            if status != "complete":
+                out.append(f"| {pdb}-{chain} | {method} | - | - | - | - | {status.replace('|', '/')} |")
+            else:
+                out.append(f"| {pdb}-{chain} | {method} | {n_subgraphs} | {n_covered} | {n_crossing} | "
+                           f"{n_knotted} | complete |")
+        out.append("")
 
     out += ["## Gauss code and Wirtinger presentation (same projection)", "",
             "Coordinates come from the atoms in `data/<id>-<chain>_simplified.json` (the bonds CSV files are not used). Recomputed by `wirtinger.external_wirtinger` (projection along z, higher z over, Reidemeister I kinks "

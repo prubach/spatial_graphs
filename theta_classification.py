@@ -15,12 +15,14 @@ import logging
 import os
 import re
 import sys
+from itertools import combinations, islice
 
 import networkx as nx
 
 log = logging.getLogger(__name__)
 
 METHODS = ('topoly', 'knotpy')
+MAX_THETA_CURVES = 20
 
 _KNOTPY_TABLE = None
 
@@ -33,6 +35,43 @@ def is_theta_graph(graph):
     if degrees.count(3) != 2 or any(d not in (2, 3) for d in degrees):
         return False
     return len(_theta_arcs(graph)) == 3
+
+
+def find_theta_subgraphs(graph, limit=MAX_THETA_CURVES):
+    """Find up to `limit` theta subdivisions, each represented by its three disjoint paths."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    ordered = nx.Graph()
+    ordered.add_nodes_from((n, dict(graph.nodes[n])) for n in sorted(graph.nodes(), key=str))
+    ordered.add_edges_from(sorted(
+        (tuple(sorted((u, v), key=str)) for u, v in graph.edges()),
+        key=lambda edge: (str(edge[0]), str(edge[1]))))
+    component = {n: i for i, nodes in enumerate(nx.connected_components(ordered)) for n in nodes}
+    branch_nodes = sorted((n for n in ordered if ordered.degree(n) >= 3), key=str)
+    found, seen = [], set()
+    for u, v in combinations(branch_nodes, 2):
+        if component[u] != component[v]:
+            continue
+        try:
+            paths = list(islice(nx.node_disjoint_paths(ordered, u, v), 3))
+        except nx.NetworkXNoPath:
+            continue
+        if len(paths) < 3:
+            continue
+        theta = nx.Graph()
+        theta.add_nodes_from((n, dict(ordered.nodes[n])) for path in paths for n in path)
+        for path in paths:
+            theta.add_edges_from(zip(path, path[1:]))
+        if not is_theta_graph(theta):
+            continue
+        key = frozenset(frozenset(edge) for edge in theta.edges())
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(theta)
+        if len(found) == limit:
+            break
+    return found
 
 
 def _theta_arcs(graph):

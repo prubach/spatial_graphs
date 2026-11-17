@@ -12,7 +12,7 @@ import dash_cytoscape as cyto
 from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
-from theta_classification import classify_theta_curve, is_theta_graph
+from theta_classification import MAX_THETA_CURVES, classify_theta_curve, find_theta_subgraphs, is_theta_graph
 from graph_algorithms import (
     HOMFLY_TIMEOUT,
     KNOT_CACHE_DIR,
@@ -261,8 +261,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Button("Next >",id="knot-next-btn",n_clicks=0,style=BTN),
         ],style={**ROW,"flexWrap":"nowrap"}),
         html.Div([
-        html.Button("Classify theta curve",id="run-theta-btn",n_clicks=0,style=BTN,
-                    title="Yamada polynomial classification of the shown graph if it is a theta curve"),
+        html.Button("Find theta curves",id="run-theta-btn",n_clicks=0,style=BTN,
+                    title="Find theta subdivisions in the shown graph and classify them by Yamada polynomial"),
         dcc.RadioItems(id="theta-method",inline=True,value="topoly",options=[
         {"label":"topoly","value":"topoly"},{"label":"knotpy","value":"knotpy"}],labelStyle=OPT),
         ],style={**ROW,"flexWrap":"nowrap"}),
@@ -1041,16 +1041,27 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             target=g
         if target is None:
             return "No graph to classify"
-        if not is_theta_graph(target):
-            return "The shown graph is not a theta curve (two degree-3 nodes joined by three arcs)"
         try:
-            res=classify_theta_curve(target,state.get('node_pos_3d'),method=tmethod)
+            candidates=[target] if is_theta_graph(target) else find_theta_subgraphs(
+                target,limit=MAX_THETA_CURVES+1)
+            if not candidates:
+                return "No theta curves found in the shown graph"
+            truncated=len(candidates)>MAX_THETA_CURVES
+            candidates=candidates[:MAX_THETA_CURVES]
+            labels=[]
+            for candidate in candidates:
+                res=classify_theta_curve(candidate,state.get('node_pos_3d'),method=tmethod)
+                name=res['name'] or "unlisted"
+                chir={'+':' (+)','-':' (mirror, -)'}.get(res['chirality'],'')
+                labels.append(f"{name}{chir}")
         except Exception as e:
             return f"Theta classification failed: {e}"
-        if res['name'] is None:
-            return f"Theta curve not in the tables (up to 5 crossings) [{res['method']}]"
-        chir={'+':' (+)','-':' (mirror, -)'}.get(res['chirality'],'')
-        return f"Theta curve: {res['name']}{chir} [Yamada, {res['method']}]"
+        result=f"Found {len(candidates)} theta curve(s): {', '.join(labels)} [Yamada, {tmethod}]"
+        if truncated:
+            result+=f" (showing the first {MAX_THETA_CURVES})"
+        elif any(label.startswith("unlisted") for label in labels):
+            result+="; unlisted curves are outside the method's classification table"
+        return result
 
     return app
 

@@ -677,7 +677,8 @@ def find_contracted_knotted_k5_minors(graph, node_pos_3d=None, params=None,
     except TimeoutError as e:
         raise TimeoutError(f'Contracted knotted K_5 search timed out after {time_limit}s; results are incomplete') from e
     return found
-def find_knotted_k5_minors(graph, node_pos_3d=None, params=None, max_results=None, time_limit=120):
+def find_knotted_k5_minors(graph, node_pos_3d=None, params=None, max_results=None, time_limit=120,
+                           raise_on_timeout=False):
     """K_5 minor models that contain a knotted loop of `graph`.
     The models are enumerated from the knotted loops (a model is knotted when one of its cycles is),
     until none remain or the time limit is reached."""
@@ -707,6 +708,8 @@ def find_knotted_k5_minors(graph, node_pos_3d=None, params=None, max_results=Non
                     if max_results is not None and len(found) >= max_results:
                         raise StopIteration
     except TimeoutError:
+        if raise_on_timeout:
+            raise
         log.warning('Knotted K_5 minor search stopped after %ss; %d found', time_limit, len(found))
     except StopIteration:
         pass

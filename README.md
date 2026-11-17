@@ -105,5 +105,5 @@ classify_theta_curve(subgraph, node_pos_3d, method="topoly")   # or "knotpy"
 
 - `topoly` uses `topoly.yamada` directly; `knotpy` computes the Yamada polynomial from the topoly planar diagram and looks it up in knotpy's theta table (up to 5 crossings). `name` is `None` if the curve is not in the tables.
 - `chirality` `+` is the curve as tabulated, `-` its mirror image; both methods agree. Needs `knotpy` (and its `tqdm`/`sympy` dependencies) for the `knotpy` method.
-- In the app: "Advanced" panel → "Classify theta curve" (choose topoly or knotpy) classifies the shown obstruction, multi-obstruction or whole graph when it is a theta curve.
+- In the app: "Advanced" panel → "Find theta curves" (choose topoly or knotpy) searches the shown obstruction, multi-obstruction or whole graph for theta subdivisions, then classifies them. It reports at most 20 curves per run.
 - Tests: `python -m unittest tests.test_theta_classification`.

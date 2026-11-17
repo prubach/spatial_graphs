@@ -30,6 +30,17 @@ class ThetaClassificationTest(unittest.TestCase):
         self.assertFalse(tc.is_theta_graph(nx.cycle_graph(5)))
         self.assertFalse(tc.is_theta_graph(nx.complete_graph(5)))
 
+    def test_find_theta_subgraph_in_larger_graph(self):
+        graph = random_theta(23, 3)
+        graph.add_node('leaf', coords=(2.0, 2.0, 2.0))
+        graph.add_edge('a0_0', 'leaf')
+        self.assertFalse(tc.is_theta_graph(graph))
+        found = tc.find_theta_subgraphs(graph)
+        self.assertTrue(found)
+        self.assertTrue(all(tc.is_theta_graph(theta) for theta in found))
+        self.assertEqual(tc.classify_theta_curve(found[0], method='topoly')['name'], 'T3_1')
+        self.assertEqual(tc.find_theta_subgraphs(nx.cycle_graph(5)), [])
+
     def test_not_theta_raises(self):
         with self.assertRaises(ValueError):
             tc.classify_theta_curve(nx.cycle_graph(4))
