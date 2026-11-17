@@ -6,3 +6,4 @@ dash-cytoscape
 dash
 ogdf-python
 ogdf-wheel
+pytest
