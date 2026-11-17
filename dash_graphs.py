@@ -12,6 +12,7 @@ import dash_cytoscape as cyto
 from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
+from theta_classification import classify_theta_curve, is_theta_graph
 from graph_algorithms import (
     HOMFLY_TIMEOUT,
     KNOT_CACHE_DIR,
@@ -259,6 +260,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Button("< Prev",id="knot-prev-btn",n_clicks=0,style=BTN),
         html.Button("Next >",id="knot-next-btn",n_clicks=0,style=BTN),
         ],style={**ROW,"flexWrap":"nowrap"}),
+        html.Div([
+        html.Button("Classify theta curve",id="run-theta-btn",n_clicks=0,style=BTN,
+                    title="Yamada polynomial classification of the shown graph if it is a theta curve"),
+        dcc.RadioItems(id="theta-method",inline=True,value="topoly",options=[
+        {"label":"topoly","value":"topoly"},{"label":"knotpy","value":"knotpy"}],labelStyle=OPT),
+        ],style={**ROW,"flexWrap":"nowrap"}),
+        html.Span(id="theta-result",style={"fontSize":"13px","fontWeight":"600","color":"#2e7d32"}),
         html.Span(id="homfly-result",style={"fontSize":"13px","fontWeight":"600","color":"#1565c0"}),
         html.Span(id="knot-info",style={"fontSize":"13px","color":"#37474f"}),
         ],id="advanced-container",style={"display":"none","flexDirection":"column","gap":"3px"})),
@@ -1008,6 +1016,41 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if knot_type=='0_1':
             return f"knot_type: 0_1 (unknot), probability: {prob:.3f}"
         return f"knot_type: {knot_type}, probability: {prob:.3f}"
+
+    @app.callback(
+        Output("theta-result","children"),
+        Input("run-theta-btn","n_clicks"),
+        State("theta-method","value"),
+        State("subgraph-index","data"),
+        State("mode","value"),
+        State("simplify-subgraph","value"),
+        prevent_initial_call=True)
+    def classify_theta(_clicks,tmethod,idx,mode,simplify_subgraph):
+        g=state.get('G')
+        if not g:
+            return ""
+        is_simplified="on" in (simplify_subgraph or [])
+        multi_subgraphs=state.get('multi_subgraphs',[])
+        if mode=="multi" and multi_subgraphs:
+            target=displayed_subgraph(idx%len(multi_subgraphs),is_simplified,"kmt")
+        elif state.get('obs') is not None and not state.get('planar'):
+            target=state['obs']
+            if is_simplified:
+                target=simplify_subgraph_topoly(target,state.get('node_pos_3d'),method="kmt")
+        else:
+            target=g
+        if target is None:
+            return "No graph to classify"
+        if not is_theta_graph(target):
+            return "The shown graph is not a theta curve (two degree-3 nodes joined by three arcs)"
+        try:
+            res=classify_theta_curve(target,state.get('node_pos_3d'),method=tmethod)
+        except Exception as e:
+            return f"Theta classification failed: {e}"
+        if res['name'] is None:
+            return f"Theta curve not in the tables (up to 5 crossings) [{res['method']}]"
+        chir={'+':' (+)','-':' (mirror, -)'}.get(res['chirality'],'')
+        return f"Theta curve: {res['name']}{chir} [Yamada, {res['method']}]"
 
     return app
 

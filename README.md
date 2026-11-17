@@ -92,3 +92,18 @@ In 2D the thickness slider also scales node circles and labels (square root of t
 "Subgraph file" (Appearance panel) downloads the currently displayed (sub)graph as JSON: parameters, nodes with coordinates, edges, highlighted edges and, when available, the matching `knot_cache` data (`loops`, `loops_analyzed`).
 
 Long knot searches print progress to the console (loops enumerated, HOMFLY loops analyzed, K_3,3 enumeration). Loops are enumerated with `networkx.simple_cycles` (much faster than Topoly's `find_loops`). Partial results are written to `<cache file>.partial.json` every 30 s and reused after an interrupted run; the "Knotted K_3,3" search also stores its per-loop results in a `..._k33knot_...json` cache file.
+
+## Theta curve classification
+
+`theta_classification.py` classifies a spatial theta curve (two degree-3 nodes joined by three arcs, with 3D coordinates) by its Yamada polynomial:
+
+```python
+from theta_classification import classify_theta_curve
+classify_theta_curve(subgraph, node_pos_3d, method="topoly")   # or "knotpy"
+# {'method': 'knotpy', 'name': 'T3_1', 'chirality': '-', 'polynomial': '...'}
+```
+
+- `topoly` uses `topoly.yamada` directly; `knotpy` computes the Yamada polynomial from the topoly planar diagram and looks it up in knotpy's theta table (up to 5 crossings). `name` is `None` if the curve is not in the tables.
+- `chirality` `+` is the curve as tabulated, `-` its mirror image; both methods agree. Needs `knotpy` (and its `tqdm`/`sympy` dependencies) for the `knotpy` method.
+- In the app: "Advanced" panel → "Classify theta curve" (choose topoly or knotpy) classifies the shown obstruction, multi-obstruction or whole graph when it is a theta curve.
+- Tests: `python -m unittest tests.test_theta_classification`.
