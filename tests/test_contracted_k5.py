@@ -138,6 +138,77 @@ class ContractedK5Tests(unittest.TestCase):
         self.assertEqual(len(retained), 1)
         self.assertTrue(retained[0].graph['knotted_loops'])
 
+    def test_highlight_selected_contracted_source_in_both_views_and_export(self):
+        first = split_k5()
+        second = split_k5()
+        for node in second:
+            second.nodes[node]['coords'][0] += 4
+        graph = nx.disjoint_union(first, second)
+        models = [ga.find_contracted_k5_minors(graph.subgraph(nodes), max_results=1)[0]
+                  for nodes in (range(10), range(10, 20))]
+        expected = {frozenset(map(str, edge)) for edge in models[1].graph['source_edges']}
+        expected_nodes = {node for edge in expected for node in edge}
+
+        with patch('dash_graphs.find_obstructions', side_effect=lambda g, method, **kw:
+                   models if method in ('k5contracted', 'k5knotcontracted') else []):
+            app = create_app(graph)
+            client = app.server.test_client()
+
+            def call(output, values, changed):
+                key = next(k for k in app.callback_map if output in k)
+                callback = app.callback_map[key]
+                outputs = callback['output']
+                def spec(item):
+                    return {'id': item.component_id, 'property': item.component_property}
+                response = client.post('/spatialgraphs/_dash-update-component', json={
+                    'output': key,
+                    'outputs': [spec(o) for o in outputs] if isinstance(outputs, list) else spec(outputs),
+                    'inputs': [dict(item, value=values.get(item['id'])) for item in callback['inputs']],
+                    'state': [dict(item, value=values.get(item['id'])) for item in callback['state']],
+                    'changedPropIds': [changed],
+                })
+                self.assertEqual(response.status_code, 200, response.data.decode())
+                return response.get_json()['response']
+
+            values = {'obstruction-method': 'k5contracted', 'graph-version': 0}
+            call('obstruction-method-error.children', values, 'obstruction-method.value')
+            values.update({'mode': 'highlight', 'subgraph-index': 1, 'graph-version': 1,
+                           'selected-obstruction-only': ['on'], 'simplify-subgraph': [],
+                           'knot-index': 0, 'knot-version': 0, 'view-dim': '2d',
+                           'edge-thickness': 3, 'rainbow-backbone': [], 'edge-color-attr': 'none',
+                           'within-index': 0, 'within-version': 0, 'knot-in-original': [],
+                           'rot3d': [0, 0, 0], 'show-grid': [], 'node-font-size': 14})
+            elements = call('graph.elements', values, 'graph-version.data')['graph']['elements']
+            highlighted = {frozenset((e['data']['source'], e['data']['target'])) for e in elements
+                           if e.get('classes') == 'obstruction' and 'source' in e['data']}
+            self.assertEqual(highlighted, expected)
+            self.assertEqual({e['data']['id'] for e in elements
+                              if e.get('classes') == 'obstruction' and 'source' not in e['data']},
+                             expected_nodes)
+            markers = [e for e in elements if e.get('classes') == 'crossing-marker']
+            self.assertTrue(markers)
+            for marker in markers:
+                for i in (1, 2):
+                    if frozenset(marker['data'][f'e{i}']) in expected:
+                        self.assertEqual(marker['data'][f'c{i}'], 'crimson')
+            figure = call('graph-3d.figure', values, 'graph-version.data')['graph-3d']['figure']
+            node_trace = figure['data'][-1]
+            self.assertEqual(set(node_trace['text']), set(map(str, graph)))
+            self.assertEqual({n for n, color in zip(node_trace['text'], node_trace['marker']['color'])
+                              if color == 'crimson'}, expected_nodes)
+            values['export-sub-btn'] = 1
+            exported = call('export-sub-download.data', values, 'export-sub-btn.n_clicks')
+            data = json.loads(exported['export-sub-download']['data']['content'])
+            self.assertEqual({frozenset(e) for e in data['highlighted_edges']}, expected)
+            self.assertEqual(len(data['nodes']), len(graph))
+            values.update({'find-k33-btn': 0, 'find-k5-btn': 0, 'find-k33knot-btn': 0,
+                           'find-k5knot-btn': 1, 'k5-representation': 'contracted'})
+            call('find-message.children', values, 'find-k5knot-btn.n_clicks')
+            elements = call('graph.elements', values, 'graph-version.data')['graph']['elements']
+            highlighted = {frozenset((e['data']['source'], e['data']['target'])) for e in elements
+                           if e.get('classes') == 'obstruction' and 'source' in e['data']}
+            self.assertEqual(highlighted, expected)
+
     def test_dash_selection_views_and_export(self):
         app = create_app(trefoil_k5())
         client = app.server.test_client()

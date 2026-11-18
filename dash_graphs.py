@@ -585,6 +585,14 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         selected=expand_k5_embedding(sub) if sub.graph.get('kind')=='contracted K_5 minor' else state['G'].edge_subgraph(sub.edges())
         return get_simplified_subgraph(idx,selected,method=method) if simplified else selected
 
+    def highlighted_obstruction(idx):
+        subs=state['multi_subgraphs']
+        if state.get('obs_method') in ("k5contracted","k5knotcontracted") and subs:
+            sub=subs[(idx or 0)%len(subs)]
+            edges={frozenset(e) for e in sub.graph['source_edges']}
+            return {n for edge in edges for n in edge},edges
+        return state['obs_nodes'],state['obs_edges']
+
     def compute_within(idx,simplified,method):
         """Knotted loops within one K_3,3 / K_5 minor (cached per subgraph, simplification and method)."""
         cache=state.setdefault('within_cache',{})
@@ -770,6 +778,11 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             thickness=EDGE_THICKNESS_VALUES[_thickness_index] if _thickness_index is not None else 1.0
             colors={**edge_color_map(g,color_attr),**(rainbow_backbone_map(g) if rainbow else {})}
             colors={frozenset(map(str,e)):c for e,c in colors.items()}
+            for element in elements:
+                data=element.get('data',{})
+                if 'source' in data and element.get('classes') in ('obstruction','knotted'):
+                    colors[frozenset((data['source'],data['target']))]=(
+                        KNOT_COLOR if element['classes']=='knotted' else 'crimson')
             return elements + _crossing_overlay_elements(elements,node_pos_3d,thickness,colors)
         if mode=="knots":
             sel=knotted_loop_selection(knot_idx)
@@ -781,7 +794,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if mode=="original":
             return finalize(build_elements(g,vpos))
         if mode=="highlight":
-            return finalize(build_elements(g,vpos,state['obs_nodes'],state['obs_edges'],True))
+            nodes,edges=highlighted_obstruction(idx)
+            return finalize(build_elements(g,vpos,nodes,edges,True))
         if mode=="multi":
             multi_subgraphs=state['multi_subgraphs']
             if not multi_subgraphs:
@@ -850,7 +864,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                     params.update(simplified=True,simplify_method="kmt")
                     label+="-simplified"
         elif mode=="highlight" and state.get('obs') is not None:
-            highlight=state['obs_edges']
+            _,highlight=highlighted_obstruction(idx)
             label="obstruction"
         coords=state.get('node_pos_3d',{})
         def coord(n):
@@ -916,7 +930,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                 return build_3d_figure(g.edge_subgraph(tuple(e) for e in sel[1]),node_pos_3d,sel[0],sel[1],True,edge_colors,show_grid,thickness,font_size,KNOT_COLOR)
             return build_3d_figure(g,node_pos_3d,sel[0],sel[1],True,edge_colors,show_grid,thickness,font_size,KNOT_COLOR)
         if mode=="highlight":
-            return build_3d_figure(g,node_pos_3d,state['obs_nodes'],state['obs_edges'],True,edge_colors,show_grid,thickness,font_size)
+            nodes,edges=highlighted_obstruction(idx)
+            return build_3d_figure(g,node_pos_3d,nodes,edges,True,edge_colors,show_grid,thickness,font_size)
         if mode=="multi":
             multi_subgraphs=state['multi_subgraphs']
             if not multi_subgraphs:
