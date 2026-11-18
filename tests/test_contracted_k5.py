@@ -91,8 +91,56 @@ class ContractedK5Tests(unittest.TestCase):
              patch.object(ga, '_isolated_homfly', side_effect=homfly):
             result = ga.find_contracted_knotted_k5_minors(graph, time_limit=30)
         self.assertEqual(result, [])
-        self.assertEqual(len(sizes), 37)
-        self.assertLessEqual(max(sizes), 5)
+        self.assertEqual(len(sizes), 74)
+        self.assertTrue(any(size > 5 for size in sizes))
+
+    def test_original_cycle_lifting_and_comparisons(self):
+        graph = split_k5()
+        expanded = ga.expand_k5_embedding(ga.find_contracted_k5_minors(graph, max_results=1)[0])
+        for cycle in nx.simple_cycles(expanded):
+            if len(cycle) < 3:
+                continue
+            original = ga._original_k5_cycle(expanded, cycle)
+            self.assertEqual(len(original), len(set(original)))
+            self.assertTrue(all(graph.has_edge(u, v)
+                                for u, v in zip(original, original[1:] + original[:1])))
+        self.assertEqual(ga._compare_knot_labels('-3_1', '-3_1'), 'same')
+        self.assertEqual(ga._compare_knot_labels('+3_1', '-3_1'), 'different')
+        self.assertEqual(ga._compare_knot_labels('0_1', '-3_1'), 'different')
+        self.assertEqual(ga._compare_knot_labels('3_1', '-3_1'), 'handedness unknown')
+        self.assertEqual(ga._compare_knot_labels('3_1', '3_1'), 'handedness unknown')
+        self.assertEqual(ga._compare_knot_labels('0_1', '0_1'), 'same')
+
+    def test_disagreements_and_original_labels_survive_cache(self):
+        graph = split_k5()
+        expanded = ga.expand_k5_embedding(ga.find_contracted_k5_minors(graph, max_results=1)[0])
+        with tempfile.TemporaryDirectory() as cache, patch.object(ga, 'KNOT_CACHE_DIR', cache):
+            results = iter([item for _ in range(37) for item in ({'+3_1': 1.0}, {'-3_1': 1.0})])
+            with patch.object(ga, '_isolated_homfly', side_effect=lambda *args: next(results)):
+                loops = ga.find_knotted_loops(expanded, workers=1)
+            self.assertEqual(len(loops), 37)
+            self.assertEqual(expanded.graph['contraction_disagreements'], 37)
+            self.assertEqual(expanded.graph['contraction_disagreement_pairs'], [('-3_1', '+3_1')])
+            self.assertTrue(all(lp['source_knot'] == '-3_1' and lp['source_comparison'] == 'different'
+                                for lp in loops))
+            expanded.graph.pop('contraction_disagreements')
+            with patch.object(ga, '_isolated_homfly', side_effect=AssertionError('unexpected recomputation')):
+                self.assertEqual(ga.find_knotted_loops(expanded, workers=1), loops)
+            self.assertEqual(expanded.graph['contraction_disagreements'], 37)
+            self.assertEqual(expanded.graph['contraction_disagreement_pairs'], [['-3_1', '+3_1']])
+
+    def test_disappearing_knots_and_inconclusive_source(self):
+        expanded = ga.expand_k5_embedding(ga.find_contracted_k5_minors(split_k5(), max_results=1)[0])
+        with tempfile.TemporaryDirectory() as cache, patch.object(ga, 'KNOT_CACHE_DIR', cache):
+            results = iter([item for _ in range(37) for item in ({'0_1': 1.0}, {'-3_1': 1.0})])
+            with patch.object(ga, '_isolated_homfly', side_effect=lambda *args: next(results)):
+                self.assertEqual(ga.find_knotted_loops(expanded, workers=1), [])
+            self.assertEqual(expanded.graph['contraction_disagreements'], 37)
+            self.assertEqual(expanded.graph['contraction_disagreement_pairs'], [('-3_1', '0_1')])
+        with tempfile.TemporaryDirectory() as cache, patch.object(ga, 'KNOT_CACHE_DIR', cache), \
+             patch.object(ga, '_isolated_homfly', side_effect=[{'0_1': 1.0}, {'TMC': 1.0}]):
+            with self.assertRaisesRegex(RuntimeError, 'corresponding original'):
+                ga.find_knotted_loops(expanded, workers=1)
 
     def test_knotted_contracted_candidate_is_returned(self):
         graph = trefoil_k5()
@@ -127,6 +175,78 @@ class ContractedK5Tests(unittest.TestCase):
         legacy.graph.clear()
         self.assertNotEqual(ga._knot_cache_path(expanded, None, 500),
                             ga._knot_cache_path(legacy, None, 500))
+        changed = expanded.copy()
+        changed.graph['k5_source_graph'] = expanded.graph['k5_source_graph'].copy()
+        source_node = next(n for n in changed.graph['k5_source_graph'] if n not in expanded)
+        changed.graph['k5_source_graph'].nodes[source_node]['coords'] = [99, 98, 97]
+        self.assertNotEqual(ga._knot_cache_path(expanded, None, 500),
+                            ga._knot_cache_path(changed, None, 500))
+
+    def test_dash_warns_for_contraction_disagreements(self):
+        graph = split_k5()
+        model = ga.find_contracted_k5_minors(graph, max_results=1)[0]
+        app = create_app(graph)
+        client = app.server.test_client()
+
+        def call(output, values, changed):
+            key = next(k for k in app.callback_map if output in k)
+            callback = app.callback_map[key]
+            def spec(item):
+                return {'id': item.component_id, 'property': item.component_property}
+            outputs = callback['output']
+            response = client.post('/spatialgraphs/_dash-update-component', json={
+                'output': key,
+                'outputs': [spec(o) for o in outputs] if isinstance(outputs, list) else spec(outputs),
+                'inputs': [dict(item, value=values.get(item['id'])) for item in callback['inputs']],
+                'state': [dict(item, value=values.get(item['id'])) for item in callback['state']],
+                'changedPropIds': [changed],
+            })
+            self.assertEqual(response.status_code, 200, response.data.decode())
+            return response.get_json()['response']
+
+        def find_loops(expanded, positions, **kwargs):
+            expanded.graph['contraction_disagreements'] = 1
+            expanded.graph['contraction_disagreement_pairs'] = [('-3_1', '+3_1')]
+            return [{'nodes': list(next(nx.simple_cycles(expanded))), 'knot': '+3_1', 'prob': 1.0,
+                     'unknot_prob': 0.0, 'source_knot': '-3_1', 'source_comparison': 'different'}]
+
+        values = {'obstruction-method': 'k5contracted', 'graph-version': 0}
+        with patch('dash_graphs.find_obstructions', return_value=[model]), \
+             patch('dash_graphs.find_knotted_loops', side_effect=find_loops), \
+             patch('dash_graphs.threading.Thread.start'):
+            call('obstruction-method-error.children', values, 'obstruction-method.value')
+            values.update({'mode': 'multi', 'subgraph-index': 0, 'graph-version': 1,
+                           'simplify-subgraph': [], 'within-index': 0, 'within-version': 0,
+                           'within-btn': 1, 'within-prev-btn': 0, 'within-next-btn': 0,
+                           'within-poll': 0, 'run-homfly-btn': 1})
+            result = call('within-info.children', values, 'within-btn.n_clicks')
+            text = str(result['within-info']['children'])
+            self.assertIn('WARNING', text)
+            self.assertIn('+3_1', text)
+            self.assertIn('-3_1', text)
+            result = call('homfly-result.children', values, 'run-homfly-btn.n_clicks')
+            text = str(result['homfly-result']['children'])
+            self.assertIn('WARNING', text)
+            self.assertIn('+3_1', text)
+            self.assertIn('-3_1', text)
+
+            def no_contracted_knots(expanded, positions, **kwargs):
+                expanded.graph['contraction_disagreements'] = 1
+                expanded.graph['contraction_disagreement_pairs'] = [('-3_1', '0_1')]
+                return []
+
+            with patch('dash_graphs.find_knotted_loops', side_effect=no_contracted_knots):
+                values.update({'obstruction-method': 'k5knotcontracted', 'graph-version': 2})
+                call('obstruction-method-error.children', values, 'obstruction-method.value')
+                text = str(call('within-info.children', values, 'within-btn.n_clicks')['within-info']['children'])
+                self.assertIn('No knot found', text)
+                self.assertIn('WARNING', text)
+                self.assertIn('-3_1', text)
+                self.assertIn('0_1', text)
+                text = str(call('homfly-result.children', values, 'run-homfly-btn.n_clicks')['homfly-result']['children'])
+                self.assertIn('WARNING', text)
+                self.assertIn('-3_1', text)
+                self.assertIn('0_1', text)
 
     def test_real_homfly_knots_before_and_after_contraction(self):
         graph, cycle = split_k5_with_trefoil()

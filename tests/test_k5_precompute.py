@@ -29,7 +29,10 @@ class PrecomputeTests(unittest.TestCase):
             calls.append(tuple(expanded.nodes))
             if len(calls) == 2:
                 raise RuntimeError("interrupted")
-            return [{'nodes': list(expanded)[:3], 'knot': '3_1', 'prob': 1.0, 'unknot_prob': 0.0}]
+            expanded.graph['contraction_disagreements'] = 1
+            expanded.graph['contraction_disagreement_pairs'] = [('-3_1', '+3_1')]
+            return [{'nodes': list(expanded)[:3], 'knot': '+3_1', 'prob': 1.0, 'unknot_prob': 0.0,
+                     'source_knot': '-3_1', 'source_comparison': 'different'}]
 
         with tempfile.TemporaryDirectory() as cache, \
              patch.object(ga, 'KNOT_CACHE_DIR', cache), \
@@ -49,6 +52,11 @@ class PrecomputeTests(unittest.TestCase):
             restored = kp.load_precomputed(graph, candidate_limit=3)
             self.assertEqual([list(m.edges()) for m in results], [list(m.edges()) for m in restored])
             self.assertEqual(results[0].graph['knotted_loops'], restored[0].graph['knotted_loops'])
+            self.assertEqual(restored[0].graph['contraction_disagreements'], 1)
+            self.assertEqual(restored[0].graph['contraction_disagreement_pairs'], [['-3_1', '+3_1']])
+            self.assertEqual(restored[0].graph['knotted_loops'][0]['source_knot'], '-3_1')
+            with patch.object(kp, 'VERSION', kp.VERSION - 1):
+                self.assertIsNone(kp.load_precomputed(graph, candidate_limit=3))
             with patch.object(ga, '_iter_k5_minors', side_effect=AssertionError('should use cache')):
                 self.assertEqual(len(ga.find_contracted_knotted_k5_minors(graph, candidate_limit=3)), 3)
                 self.assertEqual(len(ga.find_contracted_knotted_k5_minors(graph, candidate_limit=3, max_results=1)), 1)
@@ -78,6 +86,8 @@ class PrecomputeTests(unittest.TestCase):
         positions = {n: graph.nodes[n]['coords'] for n in graph}
 
         def find_loops(expanded, positions, params):
+            expanded.graph['contraction_disagreements'] = 0
+            expanded.graph['contraction_disagreement_pairs'] = []
             return [{'nodes': list(expanded)[:3], 'knot': '3_1', 'prob': 1.0, 'unknot_prob': 0.0}]
 
         with tempfile.TemporaryDirectory(prefix='k5 cache #') as cache, \

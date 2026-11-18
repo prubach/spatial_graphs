@@ -43,7 +43,9 @@ In the Advanced panel, "Highlight obstruction" shows the full structure and high
 
 This endpoint-replacement convention specifies one spatial embedding; it is not a canonical embedding of an abstract minor and can change knot types or create crossings during the move. The final embedding is checked for zero-length and intersecting segments; an invalid result is reported as an error instead of being classified. If source coordinates are unavailable, the existing 3D spring-layout fallback is used, so its knot results describe that generated layout, not a measured structure.
 
-The knotted search considers up to 1,000 candidate models and one contraction witness per model. It tests all 37 simple K_5 cycles in the resulting embedding using closed-loop HOMFLY. Consequently, no result does **not** prove that no other contraction or model is knotted. Search deadlines are checked between candidates; an individual HOMFLY analysis may take longer. A timeout or inconclusive HOMFLY result is reported as an error rather than an unknot. Contracted results use a separate cache version from legacy results.
+The knotted search considers up to 1,000 candidate models and one contraction witness per model. It tests all 37 simple K_5 cycles in the resulting embedding and their corresponding original cycles using closed-loop HOMFLY. Candidates are retained if their contracted cycles are knotted, but the display warns when classifications differ, including when a knot disappears after contraction. "Knot within" shows the original label for each contracted knot and warns if handedness is undetermined. Matching HOMFLY labels do not prove that the contraction preserved the knot or that the curves are ambient isotopic. The additional original-cycle tests increase computation time.
+
+No result does **not** prove that no other contraction or model is knotted. Search deadlines are checked between candidates; an individual HOMFLY analysis may take longer. A timeout or inconclusive HOMFLY result for either cycle is reported as an error rather than an unknot. Contracted results use a separate cache version from legacy results; older contracted search and precomputation caches are not reused.
 
 ## Knotted loops vs "Run HOMFLY" button
 
@@ -51,6 +53,7 @@ Knotted loops are detected on the whole loaded graph, that may be the simplified
 Knotted loops are detected automatically when the graph is loaded or changed, and the result appears in the "Knotted loops" section of the right panel.
 
 "Run HOMFLY" (in the "Advanced" section) runs a 500-try HOMFLY test once, on demand, on the currently shown obstruction subgraph. The result clears on the next change.
+For contracted K_5 embeddings it instead reports the first knotted contracted cycle, its original-cycle label, and any classification disagreement across the cycles; if no contracted cycle is knotted, it reports an unknot with any disagreement warning.
 
 ## Install Sage using MiniConda3
 

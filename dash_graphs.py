@@ -95,6 +95,13 @@ from graph_data import (
     topoly_graph_to_networkx,
 )
 
+def contraction_warning(count, pairs):
+    if not count:
+        return ""
+    labels=", ".join(f"{source} → {contracted}" for source,contracted in pairs)
+    return f" WARNING: {count} cycle(s) changed classification (original → contracted: {labels})."
+
+
 def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topoly=False):
     if G is None:
         if pdbid:
@@ -539,6 +546,10 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             text+=f" (found by {' and '.join(sources)})"
         if method=="k5knotcontracted":
             text+="; up to 1,000 candidate models, one contraction each"
+        if method in ("k5contracted","k5knotcontracted"):
+            count=subgraphs[idx].graph.get('contraction_disagreements')
+            text+=(contraction_warning(count,subgraphs[idx].graph['contraction_disagreement_pairs'])
+                   if count else "; contraction can change knot types; check Knot within for comparison")
         return text
 
     @app.callback(Output("prev-btn","children"),Output("next-btn","children"),Input("graph-version","data"))
@@ -599,13 +610,19 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         key=within_key(idx,simplified,method)
         if key not in cache:
             try:
-                loops=state['multi_subgraphs'][idx].graph.get('knotted_loops') if not simplified else None
+                sub=state['multi_subgraphs'][idx]
+                loops=sub.graph.get('knotted_loops') if not simplified else None
+                disagreements=sub.graph.get('contraction_disagreements') if loops is not None else None
+                pairs=sub.graph.get('contraction_disagreement_pairs',[]) if loops is not None else []
                 if loops is None:
-                    loops=find_knotted_loops(displayed_subgraph(idx,simplified,method),state.get('node_pos_3d'),tries=500,
+                    shown=displayed_subgraph(idx,simplified,method)
+                    loops=find_knotted_loops(shown,state.get('node_pos_3d'),tries=500,
                                              params=dict(state.get('graph_params',{}),within=state['obs_method'],
                                                          subgraph_index=idx,simplified=simplified,
                                                          simplify_method=method if simplified else None))
-                cache[key]=dict(loops=loops)
+                    disagreements=shown.graph.get('contraction_disagreements')
+                    pairs=shown.graph.get('contraction_disagreement_pairs',[])
+                cache[key]=dict(loops=loops,contraction_disagreements=disagreements,contraction_disagreement_pairs=pairs)
             except Exception as e:
                 cache[key]=dict(loops=[],error=str(e))
         return cache[key]
@@ -664,13 +681,27 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if 'error' in w:
             return f"Knot search failed: {w['error']}"
         loops=w['loops']
+        disagreements=w.get('contraction_disagreements')
+        warning=contraction_warning(disagreements,w.get('contraction_disagreement_pairs',[]))
         if not loops:
-            return f"No knot found within this {name}.{bg}"
+            if warning:
+                return [f"No knot found within this {name}.",
+                        html.Strong(warning,style={"color":"#b71c1c"}),bg]
+            return f"No knot found within this {name}.{warning}{bg}"
         k=loops[widx%len(loops)]
         knot=k['knot']
         if knot[0] not in "+-":
             knot+=" (achiral or handedness undetermined)"
-        return [f"Knot {widx%len(loops)+1} of {len(loops)}: {knot}, P={k['prob']:.2f}{bg}",
+        comparison=""
+        if 'source_knot' in k:
+            comparison=f" Original cycle: {k['source_knot']} ({k['source_comparison']})."
+            if k['source_comparison']=='different':
+                comparison=" WARNING: contraction changed this loop's knot classification."+comparison
+            elif k['source_comparison']=='handedness unknown':
+                comparison=" WARNING: handedness could not be compared reliably."+comparison
+        return [f"Knot {widx%len(loops)+1} of {len(loops)}: {knot}, P={k['prob']:.2f}",
+                html.Strong(comparison+warning,style={"color":"#b71c1c"}) if 'WARNING' in comparison+warning else comparison+warning,
+                bg,
                 wirtinger_block(k['nodes'],displayed_subgraph(idx,simplified,method))]
 
     @app.callback(Output("within-index","data"),Output("within-version","data"),Output("within-info","children"),
@@ -1013,24 +1044,38 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
 
         cached=state.setdefault('homfly_cache',{}).get(cache_key)
         if cached is not None:
-            knot_type,prob=cached
+            knot_type,prob,warning=cached
         else:
             try:
-                knot_type,prob=cached_subgraph_homfly(target_g,state.get('node_pos_3d'),tries=500,
-                                                        params=dict(state.get('graph_params',{}),view=cache_key[1],
-                                                                    subgraph_index=cache_key[2],simplified=is_simplified,
-                                                                    simplify_method=method if is_simplified else None,
-                                                                    obstruction_finder=state.get('obs_method')))
+                params=dict(state.get('graph_params',{}),view=cache_key[1],
+                            subgraph_index=cache_key[2],simplified=is_simplified,
+                            simplify_method=method if is_simplified else None,
+                            obstruction_finder=state.get('obs_method'))
+                warning=""
+                if target_g.graph.get('strict_homfly'):
+                    loops=find_knotted_loops(target_g,state.get('node_pos_3d'),tries=500,params=params)
+                    knot_type,prob=(loops[0]['knot'],loops[0]['prob']) if loops else ('0_1',1.0)
+                    warning=" Result describes the contracted embedding, not necessarily the original structure."
+                    if loops:
+                        first=loops[0]
+                        warning+=f" Original cycle: {first['source_knot']} ({first['source_comparison']})."
+                    count=target_g.graph['contraction_disagreements']
+                    warning+=contraction_warning(count,target_g.graph['contraction_disagreement_pairs'])
+                    if loops and loops[0]['source_comparison']=='handedness unknown':
+                        warning+=" WARNING: handedness could not be compared reliably."
+                else:
+                    knot_type,prob=cached_subgraph_homfly(target_g,state.get('node_pos_3d'),tries=500,params=params)
             except Exception as e:
                 return f"HOMFLY test failed: {e}"
             if knot_type is not None:
-                state['homfly_cache'][cache_key]=(knot_type,prob)
+                state['homfly_cache'][cache_key]=(knot_type,prob,warning)
 
         if knot_type is None:
             return "HOMFLY test failed (crashed, timed out or inconclusive)"
-        if knot_type=='0_1':
-            return f"knot_type: 0_1 (unknot), probability: {prob:.3f}"
-        return f"knot_type: {knot_type}, probability: {prob:.3f}"
+        label=f"knot_type: {knot_type}{' (unknot)' if knot_type=='0_1' else ''}, probability: {prob:.3f}"
+        if warning:
+            return [label,html.Strong(warning,style={"color":"#b71c1c"})]
+        return label
 
     @app.callback(
         Output("theta-result","children"),

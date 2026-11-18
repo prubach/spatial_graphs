@@ -279,6 +279,8 @@ def _contracted_k5(graph, witness, node_pos_3d=None):
         tree.add_edges_from(trees[root])
         branches[root] = set(tree)
     result = nx.Graph(kind='contracted K_5 minor', contraction='endpoint replacement')
+    result.graph['k5_branch_trees'] = {root: list(trees[root]) for root in roots}
+    result.graph['k5_source_paths'] = {}
     for root in roots:
         result.add_node(root, coords=coords(root),
                         branch_set=list(branches[root]))
@@ -299,10 +301,40 @@ def _contracted_k5(graph, witness, node_pos_3d=None):
             points = [coords(n) for n in path[1:-1]]
             original_edges = list(zip(path, path[1:]))
             source_edges.update(frozenset(e) for e in original_edges)
+            result.graph['k5_source_paths'][frozenset((u, v))] = (u, v, path)
             result.add_edge(u, v, points=points, source_edges=original_edges)
     result.graph['source_edges'] = sorted((tuple(sorted(e, key=str)) for e in source_edges),
                                           key=lambda e: tuple(map(str, e)))
+    source = nx.Graph()
+    source.add_edges_from(result.graph['source_edges'])
+    nx.set_node_attributes(source, {n: coords(n) for n in source}, 'coords')
+    result.graph['k5_source_graph'] = source
     return result
+
+
+def _original_k5_cycle(graph, cycle):
+    """Lift a contracted cycle through the original connecting paths and branch trees."""
+    roots = graph.graph['k5_branch_trees']
+    hubs = [n for n in cycle if n in roots]
+    if len(hubs) < 3 or len(set(hubs)) != len(hubs):
+        raise ValueError("Contracted cycle does not have distinct K_5 branch vertices")
+    paths = []
+    for u, v in zip(hubs, hubs[1:] + hubs[:1]):
+        start, end, path = graph.graph['k5_source_paths'][frozenset((u, v))]
+        paths.append(list(path) if (start, end) == (u, v) else list(reversed(path)))
+    original = []
+    for i, root in enumerate(hubs):
+        branch = nx.Graph()
+        branch.add_node(root)
+        branch.add_edges_from(roots[root])
+        tree_path = nx.shortest_path(branch, paths[i - 1][-1], paths[i][0])
+        original.extend(tree_path[:-1])
+        original.extend(paths[i][:-1])
+    source = graph.graph['k5_source_graph']
+    if len(original) < 3 or len(set(original)) != len(original) or any(
+            not source.has_edge(u, v) for u, v in zip(original, original[1:] + original[:1])):
+        raise ValueError("Cannot map contracted cycle to a simple original cycle")
+    return original
 
 
 def expand_k5_embedding(graph):
@@ -669,6 +701,8 @@ def find_contracted_knotted_k5_minors(graph, node_pos_3d=None, params=None,
             if loops:
                 contracted.graph['sources'] = ['knotted contracted embedding']
                 contracted.graph['knotted_loops'] = loops
+                contracted.graph['contraction_disagreements'] = expanded.graph['contraction_disagreements']
+                contracted.graph['contraction_disagreement_pairs'] = expanded.graph['contraction_disagreement_pairs']
                 found.append(contracted)
                 if max_results is not None and len(found) >= max_results:
                     break
@@ -961,6 +995,26 @@ def classify_homfly(res, max_unknot=0.5, min_knot=0.48):
     if unknot < max_unknot and knots[best] >= min_knot:
         return best, knots[best], unknot
     return None
+
+
+def _checked_homfly_label(result, description):
+    verdict = classify_homfly(result)
+    if verdict is not None:
+        return verdict[0]
+    if result and float(result.get('0_1', 0.0)) >= 0.5:
+        return '0_1'
+    raise RuntimeError(f"HOMFLY failed or was inconclusive for {description}")
+
+
+def _compare_knot_labels(contracted, original):
+    if contracted == original:
+        return 'same' if contracted == '0_1' or contracted[0] in '+-' else 'handedness unknown'
+    if contracted.lstrip('+-') == original.lstrip('+-') and (
+            contracted[0] not in '+-' or original[0] not in '+-'):
+        return 'handedness unknown'
+    return 'different'
+
+
 KNOT_CACHE_DIR = os.environ.get('KNOT_CACHE_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'knot_cache'))
 def _knot_cache_path(graph, node_pos_3d, tries, kind='', params=None):
     """Cache file path: <pdbid>/<pdbid>_<chain>_<source>_<within>_<subgraph index>_<nodes>n_<hash>.json.
@@ -968,7 +1022,7 @@ def _knot_cache_path(graph, node_pos_3d, tries, kind='', params=None):
     differ only in e.g. simplification still get distinct files."""
     import hashlib
     params = params or {}
-    version = 'v6-contracted-closed' if graph.graph.get('strict_homfly') else 'v4-closed'
+    version = 'v8-contracted-source-checked' if graph.graph.get('strict_homfly') else 'v4-closed'
     h = hashlib.sha256(f'{version}|{tries}|{kind}'.encode())
     for n in sorted(graph.nodes(), key=str):
         c = graph.nodes[n].get('coords')
@@ -978,6 +1032,15 @@ def _knot_cache_path(graph, node_pos_3d, tries, kind='', params=None):
         h.update(f'{n}:{values};'.encode())
     for e in sorted(tuple(sorted((str(u), str(v)))) for u, v in graph.edges()):
         h.update(f'{e};'.encode())
+    if graph.graph.get('strict_homfly'):
+        source = graph.graph['k5_source_graph']
+        for n in sorted(source, key=str):
+            h.update(f'{n}:{source.nodes[n]["coords"]};'.encode())
+        for root, edges in sorted(graph.graph['k5_branch_trees'].items(), key=lambda item: str(item[0])):
+            h.update(f'{root}:{sorted(tuple(sorted(map(str, e))) for e in edges)};'.encode())
+        for u, v, path in sorted(graph.graph['k5_source_paths'].values(),
+                                 key=lambda item: (str(item[0]), str(item[1]))):
+            h.update(f'{u}:{v}:{list(map(str, path))};'.encode())
     within = params.get('within') or kind or 'whole'
     if params.get('simplified'):
         within += '-simplified'
@@ -1024,6 +1087,9 @@ def find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, params=
         with open(path) as f:
             data = json.load(f)
         loops = data['loops']
+        if graph.graph.get('strict_homfly'):
+            graph.graph['contraction_disagreements'] = data['contraction_disagreements']
+            graph.graph['contraction_disagreement_pairs'] = data['contraction_disagreement_pairs']
         for lp in loops:
             lp['nodes'] = [by_str[n] for n in lp['nodes']]
         return loops
@@ -1032,6 +1098,13 @@ def find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, params=
     analyzed = []
     loops = _find_knotted_loops(graph, node_pos_3d, tries, workers, analyzed=analyzed,
                                 partial_path=path[:-len('.json')] + '.partial.json')
+    disagreements = sum(a.get('source_comparison') == 'different' for a in analyzed)
+    if graph.graph.get('strict_homfly'):
+        graph.graph['contraction_disagreements'] = disagreements
+        graph.graph['contraction_disagreement_pairs'] = sorted({
+            (a['source_knot'], a['contracted_knot']) for a in analyzed
+            if a.get('source_comparison') == 'different'
+        })
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = f'{path}.{os.getpid()}.tmp'
@@ -1039,6 +1112,8 @@ def find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, params=
             json.dump(dict(params=dict(params or {}, tries=tries, nodes=graph.number_of_nodes(),
                                        edges=graph.number_of_edges()),
                            nodes=[str(n) for n in graph.nodes()],
+                           contraction_disagreements=disagreements,
+                           contraction_disagreement_pairs=graph.graph.get('contraction_disagreement_pairs', []),
                            loops=[{**lp, 'nodes': [str(n) for n in lp['nodes']]} for lp in loops],
                            loops_analyzed=[{**a, 'nodes': [str(n) for n in a['nodes']]} for a in analyzed]),
                       f, indent=1)
@@ -1135,15 +1210,20 @@ def _find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, analyz
         key = loop_key(names)
         cached = key in done
         res = done[key] if cached else _isolated_homfly(coords, tries)
-        if (not res or not any(k != 'TMC' for k in res)) and graph.graph.get('strict_homfly'):
-            raise RuntimeError("HOMFLY failed for a cycle of the contracted K_5")
         loop_nodes = [id_to_node[i] for i in ids]
         verdict = classify_homfly(res)
-        if graph.graph.get('strict_homfly') and verdict is None and float(res.get('0_1', 0.0)) < 0.5:
-            raise RuntimeError("HOMFLY was inconclusive for a cycle of the contracted K_5")
+        comparison = {}
+        if graph.graph.get('strict_homfly'):
+            contracted_label = _checked_homfly_label(res, "a cycle of the contracted K_5")
+            source = graph.graph['k5_source_graph']
+            source_nodes = _original_k5_cycle(graph, loop_nodes)
+            source_result = _isolated_homfly([source.nodes[n]['coords'] for n in source_nodes], tries)
+            source_label = _checked_homfly_label(source_result, "the corresponding original K_5 cycle")
+            comparison = dict(source_knot=source_label, contracted_knot=contracted_label,
+                              source_comparison=_compare_knot_labels(contracted_label, source_label))
         with lock:
             if analyzed is not None:
-                analyzed.append(dict(nodes=loop_nodes, homfly=res, knotted=verdict is not None))
+                analyzed.append(dict(nodes=loop_nodes, homfly=res, knotted=verdict is not None, **comparison))
             if not cached:
                 entries.append(dict(nodes=names, homfly=res))
             progress['count'] += 1
@@ -1156,7 +1236,7 @@ def _find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, analyz
                 _write_json(partial_path, dict(analyzed=entries))
         if verdict is None:
             return None
-        return dict(nodes=loop_nodes, knot=verdict[0], prob=verdict[1], unknot_prob=verdict[2])
+        return dict(nodes=loop_nodes, knot=verdict[0], prob=verdict[1], unknot_prob=verdict[2], **comparison)
 
     with ThreadPoolExecutor(max_workers=workers or min(8, os.cpu_count() or 1)) as pool:
         found = [r for r in pool.map(evaluate, unique) if r is not None]
