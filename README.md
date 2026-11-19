@@ -28,8 +28,9 @@ After choosing a protein, the "Find" panel works as follows:
 - "K_3,3" finds all K_3,3 subdivisions (OGDF and SageMath results are merged and deduplicated; the finder(s) that reported each one are shown). "K_5 minor" finds contracted K_5 embeddings by default.
 - "Knotted K_3,3" lists K_3,3 subdivisions that contain a knotted loop of the whole graph (at most 100, smallest first). OGDF and SageMath report only a few subdivisions, which can all be unknotted, so these are enumerated from the knotted loops.
 - "Knotted K_5 minor" tests cycles of contracted K_5 embeddings, rather than loops of their original models.
+- "Theta curves" searches the entire loaded graph, including planar graphs, for up to 20 theta subdivisions. It finds at most one set of three internally disjoint paths per pair of branch vertices, so it is not an exhaustive enumeration of all theta curves.
 - Select "Original minor model (legacy)" to use the previous K_5 searches and display the original subgraphs. The legacy knotted search reports models containing a knotted loop before contraction; that knot need not survive contraction.
-- "Next/Prev" steps through the results.
+- "Next/Prev" steps through the results. Theta curves can be shown alone or highlighted in the full structure, viewed in 2D or 3D, and exported like the other results.
 - "Knot within" looks for knotted loops inside the shown K_3,3 / K_5 minor and highlights one in orange with its knot type and handedness (e.g. +3_1 vs -3_1). "Next knot" / "Prev knot" step through them.
 - Knots within all K_3,3 / K_5 minors are computed in the background right after a search (starting from the shown one), so Next/Prev show results immediately once ready; the status line says while it is still searching.
 - "Highlight knot in full graph" (on by default) colours the original knotted loop orange in the full graph when "Show selected obstruction only" is off. This is not applied to contracted K_5 loops, which need not be loops of the original graph; the original edges of their minor model are highlighted instead.
@@ -112,5 +113,6 @@ classify_theta_curve(subgraph, node_pos_3d, method="topoly")   # or "knotpy"
 
 - `topoly` uses `topoly.yamada` directly; `knotpy` computes the Yamada polynomial from the topoly planar diagram and looks it up in knotpy's theta table (up to 5 crossings). `name` is `None` if the curve is not in the tables.
 - `chirality` `+` is the curve as tabulated, `-` its mirror image; both methods agree. Needs `knotpy` (and its `tqdm`/`sympy` dependencies) for the `knotpy` method.
-- In the app: "Advanced" panel → "Find theta curves" (choose topoly or knotpy) searches the shown obstruction, multi-obstruction or whole graph for theta subdivisions, then classifies them. It reports at most 20 curves per run.
+- In the app, use "Theta curves" in the Find panel to search and visualize results. To classify the selected curve, open "Advanced", choose topoly or knotpy, and click "Find theta curves". That action also searches and classifies theta subdivisions within other shown graphs (at most 20 per run).
+- Completed theta searches, including empty results, are cached under `knot_cache/` by graph topology, search limit and cache version; current node attributes are restored when loading. Successful classifications are cached separately by curve geometry and method. Failed classifications are not cached. To precompute the same theta search used by the app, run `python precompute_cache.py 1A8E --methods theta --no-subgraphs -j 1`.
 - Tests: `python -m unittest tests.test_theta_classification`.

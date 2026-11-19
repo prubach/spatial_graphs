@@ -5,7 +5,7 @@ the whole-graph knotted loops, the four obstruction families (k33, k5, k33knot, 
 each obstruction the knotted loops within it (original and simplified) and its HOMFLY knot type.
 Results already in the cache are reused, so the script can be interrupted and restarted.
 
-Usage: python precompute_cache.py [PDBID[CHAIN] ...] [--methods k33 k5 k5contracted ...] [--no-subgraphs] [-j JOBS]
+Usage: python precompute_cache.py [PDBID[CHAIN] ...] [--methods k33 k5 k5contracted theta ...] [--no-subgraphs] [-j JOBS]
 """
 import argparse
 import os
@@ -18,8 +18,9 @@ from graph_algorithms import (
 from graph_data import TopolyReduce, list_data_pdbids, load_graph_by_id, split_pdbid_chain
 from graph_visualization import get_node_positions_3d
 from k5_precompute import precompute_knotted_k5
+from theta_classification import MAX_THETA_CURVES, cached_theta_subgraphs
 
-METHODS = ("k33", "k5", "k33knot", "k5knot", "k5contracted", "k5knotcontracted")
+METHODS = ("k33", "k5", "k33knot", "k5knot", "k5contracted", "k5knotcontracted", "theta")
 SIMPLIFY_METHOD = "kmt"
 
 
@@ -51,17 +52,21 @@ def find_task(pdbid, method):
     """Find the obstructions of one family."""
     G, node_pos_3d, params = _context(pdbid)
     _log(f"{pdbid}: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
-    if method not in ("k5contracted", "k5knotcontracted"):
+    if method not in ("k5contracted", "k5knotcontracted", "theta"):
         find_knotted_loops(G, node_pos_3d, params=params)
     kwargs = dict(node_pos_3d=node_pos_3d, params=dict(params)) if method in ("k33knot", "k5knot", "k5knotcontracted") else {}
     if method == "k5contracted":
         kwargs = dict(node_pos_3d=node_pos_3d)
     try:
-        subs = precompute_knotted_k5(G, node_pos_3d, params) if method == "k5knotcontracted" \
-            else find_obstructions(G, method, **kwargs)
+        if method == "theta":
+            subs = cached_theta_subgraphs(G, limit=MAX_THETA_CURVES + 1)[:MAX_THETA_CURVES]
+        elif method == "k5knotcontracted":
+            subs = precompute_knotted_k5(G, node_pos_3d, params)
+        else:
+            subs = find_obstructions(G, method, **kwargs)
     except Exception as e:
         _log(f"{pdbid} {method}: failed: {e}")
-        if method == "k5knotcontracted":
+        if method in ("k5knotcontracted", "theta"):
             raise
         return []
     _log(f"{pdbid} {method}: {len(subs)} subgraphs")

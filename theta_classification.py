@@ -12,6 +12,8 @@ Both return the same dict: ``method``, ``name`` (e.g. ``T3_1``, ``None`` if not 
 Chirality ``+`` is the curve as listed in the knotpy table and ``-`` its mirror image.
 """
 import logging
+import hashlib
+import json
 import os
 import re
 import sys
@@ -23,6 +25,7 @@ log = logging.getLogger(__name__)
 
 METHODS = ('topoly', 'knotpy')
 MAX_THETA_CURVES = 20
+THETA_CACHE_VERSION = 1
 
 _KNOTPY_TABLE = None
 
@@ -72,6 +75,60 @@ def find_theta_subgraphs(graph, limit=MAX_THETA_CURVES):
         if len(found) == limit:
             break
     return found
+
+
+def _theta_cache_path(kind, payload):
+    import graph_algorithms as ga
+    encoded = json.dumps([THETA_CACHE_VERSION, kind, payload], separators=(',', ':'), allow_nan=False)
+    digest = hashlib.sha256(encoded.encode()).hexdigest()
+    return os.path.join(ga.KNOT_CACHE_DIR, f'theta_{kind}_{digest}.json')
+
+
+def cached_theta_subgraphs(graph, limit=MAX_THETA_CURVES):
+    """Cache completed theta searches, restoring node attributes from the current graph."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    nodes = list(graph)
+    labels = [(type(n).__module__, type(n).__qualname__, repr(n)) for n in nodes]
+    if len(set(labels)) != len(labels):
+        log.warning("Theta search cache skipped: node representations are not unique")
+        return find_theta_subgraphs(graph, limit)
+    index = {n: i for i, n in enumerate(nodes)}
+    edges = [[index[u], index[v]] for u, v in graph.edges()]
+    path = _theta_cache_path('search', [limit, labels, edges])
+    import graph_algorithms as ga
+    data = ga._read_json(path)
+    if data is not None:
+        try:
+            results = []
+            for entry in data['results']:
+                node_ids = entry['nodes']
+                edge_ids = entry['edges']
+                if (not isinstance(node_ids, list) or not isinstance(edge_ids, list)
+                        or any(type(i) is not int or not 0 <= i < len(nodes) for i in node_ids)
+                        or len(set(node_ids)) != len(node_ids)
+                        or any(not isinstance(edge, list) or len(edge) != 2
+                               or any(type(i) is not int or i not in node_ids for i in edge)
+                               for edge in edge_ids)):
+                    raise ValueError("invalid theta node or edge indices")
+                selected = [nodes[i] for i in node_ids]
+                theta = nx.Graph()
+                theta.add_nodes_from((n, dict(graph.nodes[n])) for n in selected)
+                theta.add_edges_from((nodes[u], nodes[v]) for u, v in edge_ids)
+                if not is_theta_graph(theta) or any(not graph.has_edge(u, v) for u, v in theta.edges()):
+                    raise ValueError("invalid theta subdivision")
+                results.append(theta)
+            if len(results) > limit:
+                raise ValueError("too many theta subdivisions")
+            return results
+        except (KeyError, TypeError, IndexError, ValueError):
+            log.warning("Invalid theta search cache %s; recomputing", path)
+    results = find_theta_subgraphs(graph, limit)
+    ga._write_json(path, {'results': [
+        {'nodes': [index[n] for n in theta],
+         'edges': [[index[u], index[v]] for u, v in theta.edges()]}
+        for theta in results]})
+    return results
 
 
 def _theta_arcs(graph):
@@ -207,3 +264,23 @@ def classify_theta_curve(subgraph, node_pos_3d=None, method='topoly'):
         raise ValueError("Not a theta graph: need two degree-3 nodes joined by three arcs")
     arcs = _topoly_arcs(subgraph, node_pos_3d)
     return _classify_topoly(arcs) if method == 'topoly' else _classify_knotpy(arcs)
+
+
+def cached_theta_classification(subgraph, node_pos_3d=None, method='topoly'):
+    """Cache a successful classification separately for each method and geometry."""
+    if method not in METHODS:
+        raise ValueError(f"Unknown method {method!r}; expected one of {METHODS}")
+    if not is_theta_graph(subgraph):
+        raise ValueError("Not a theta graph: need two degree-3 nodes joined by three arcs")
+    arcs = _topoly_arcs(subgraph, node_pos_3d)
+    path = _theta_cache_path('classification', [method, arcs])
+    import graph_algorithms as ga
+    result = ga._read_json(path)
+    if (isinstance(result, dict) and result.get('method') == method
+            and all(key in result for key in ('name', 'chirality', 'polynomial'))):
+        return result
+    if result is not None:
+        log.warning("Invalid theta classification cache %s; recomputing", path)
+    result = _classify_topoly(arcs) if method == 'topoly' else _classify_knotpy(arcs)
+    ga._write_json(path, result)
+    return result

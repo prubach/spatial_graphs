@@ -12,7 +12,7 @@ import dash_cytoscape as cyto
 from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
-from theta_classification import MAX_THETA_CURVES, classify_theta_curve, find_theta_subgraphs, is_theta_graph
+from theta_classification import MAX_THETA_CURVES, cached_theta_classification, cached_theta_subgraphs, is_theta_graph
 from graph_algorithms import (
     HOMFLY_TIMEOUT,
     KNOT_CACHE_DIR,
@@ -116,18 +116,26 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     def compute_obstructions(g,pos,method,**kwargs):
         planar,obs=nx.check_planarity(g,counterexample=True)
         multi_subgraphs=[]
-        if not planar:
+        theta_truncated=False
+        if method=="theta":
+            multi_subgraphs=cached_theta_subgraphs(g,limit=MAX_THETA_CURVES+1)
+            theta_truncated=len(multi_subgraphs)>MAX_THETA_CURVES
+            multi_subgraphs=multi_subgraphs[:MAX_THETA_CURVES]
+            if multi_subgraphs:
+                obs=multi_subgraphs[0]
+        elif not planar:
             if method in ("k5contracted","k5knotcontracted"):
                 kwargs.setdefault('node_pos_3d',get_node_positions_3d(g))
             multi_subgraphs=find_obstructions(g,method,**kwargs)
             if method in ("sage","k5","k33","k33knot","k5knot","k5contracted","k5knotcontracted") and multi_subgraphs:
                 obs=multi_subgraphs[0]
-        source_edges=obs.graph.get('source_edges', list(obs.edges())) if not planar else []
+        source_edges=obs.graph.get('source_edges', list(obs.edges())) if obs is not None else []
         return dict(planar=planar,obs=obs,
-                    obs_nodes={n for edge in source_edges for n in edge} if not planar else set(),
+                    obs_nodes={n for edge in source_edges for n in edge},
                     obs_edges={frozenset(e) for e in source_edges},
-                    obs_pos={n:pos[n] for n in obs.nodes()} if not planar else {},
-                    multi_subgraphs=multi_subgraphs,multi_subgraphs_simplified={},homfly_cache={})
+                    obs_pos={n:pos[n] for n in obs.nodes()} if obs is not None else {},
+                    multi_subgraphs=multi_subgraphs,multi_subgraphs_simplified={},homfly_cache={},
+                    theta_truncated=theta_truncated)
 
     def recompute(g,method="ogdf",params=None):
         node_pos_3d=get_node_positions_3d(g)
@@ -213,6 +221,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                         title="K_3,3 subdivisions containing a knotted loop (may take a while)"),
             html.Button("Knotted K_5 minor",id="find-k5knot-btn",n_clicks=0,style=BTN_PRIMARY,
                         title="K_5 minors containing a knotted loop (may take a while)"),
+            html.Button("Theta curves",id="find-theta-btn",n_clicks=0,style=BTN_PRIMARY,
+                        title="Find theta subdivisions in the whole graph"),
             dcc.RadioItems(id="k5-representation",inline=True,value="contracted",options=[
                 {"label":"Contracted K_5","value":"contracted"},
                 {"label":"Original minor model (legacy)","value":"legacy"}],labelStyle=OPT),
@@ -526,13 +536,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
 
     FAMILY_LABELS={"k33":"K_3,3","k5":"K_5 minor model (legacy)","k33knot":"Knotted K_3,3",
                    "k5knot":"Knotted K_5 model (legacy)","k5contracted":"Contracted K_5 minor",
-                   "k5knotcontracted":"Knotted contracted K_5 minor"}
+                   "k5knotcontracted":"Knotted contracted K_5 minor","theta":"Theta curve"}
 
     @app.callback(Output("subgraph-info","children"),Input("subgraph-index","data"),Input("graph-version","data"))
     def update_info(idx,_version):
         method=state.get('obs_method')
         if method not in FAMILY_LABELS:
-            return "Click K_3,3, K_5 minor, Knotted K_3,3 or Knotted K_5 minor."
+            return "Click K_3,3, K_5 minor, Knotted K_3,3, Knotted K_5 minor or Theta curves."
         subgraphs=state['multi_subgraphs']
         n=len(subgraphs)
         name=FAMILY_LABELS[method]
@@ -542,6 +552,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         idx=(idx or 0)%n
         sources=subgraphs[idx].graph.get('sources')
         text=f"{name} {idx+1} of {n}"
+        if method=="theta":
+            text+=f" (one subdivision per branch pair; {'first ' if state.get('theta_truncated') else 'up to '}{MAX_THETA_CURVES})"
         if sources:
             text+=f" (found by {' and '.join(sources)})"
         if method=="k5knotcontracted":
@@ -560,10 +572,10 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     @app.callback(Output("graph-version","data",allow_duplicate=True),Output("subgraph-index","data",allow_duplicate=True),
     Output("mode","value",allow_duplicate=True),Output("selected-obstruction-only","value",allow_duplicate=True),
     Output("find-message","children"),
-    Input("find-k33-btn","n_clicks"),Input("find-k5-btn","n_clicks"),Input("find-k33knot-btn","n_clicks"),Input("find-k5knot-btn","n_clicks"),
+    Input("find-k33-btn","n_clicks"),Input("find-k5-btn","n_clicks"),Input("find-k33knot-btn","n_clicks"),Input("find-k5knot-btn","n_clicks"),Input("find-theta-btn","n_clicks"),
     State("graph-version","data"),State("k5-representation","value"),prevent_initial_call=True)
-    def find_family(_k33,_k5,_k33knot,_k5knot,version,representation):
-        method={"find-k33-btn":"k33","find-k33knot-btn":"k33knot","find-k5knot-btn":"k5knot"}.get(ctx.triggered_id,"k5")
+    def find_family(_k33,_k5,_k33knot,_k5knot,_theta,version,representation):
+        method={"find-k33-btn":"k33","find-k33knot-btn":"k33knot","find-k5knot-btn":"k5knot","find-theta-btn":"theta"}.get(ctx.triggered_id,"k5")
         if representation=="contracted" and method in ("k5","k5knot"):
             method+="contracted"
         extra=dict(node_pos_3d=state.get('node_pos_3d'),params=dict(state.get('graph_params',{}))) if method in ("k33knot","k5knot","k5knotcontracted") else {}
@@ -598,9 +610,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
 
     def highlighted_obstruction(idx):
         subs=state['multi_subgraphs']
-        if state.get('obs_method') in ("k5contracted","k5knotcontracted") and subs:
+        if state.get('obs_method') in ("k5contracted","k5knotcontracted","theta") and subs:
             sub=subs[(idx or 0)%len(subs)]
-            edges={frozenset(e) for e in sub.graph['source_edges']}
+            edges={frozenset(e) for e in sub.graph.get('source_edges',sub.edges())}
             return {n for edge in edges for n in edge},edges
         return state['obs_nodes'],state['obs_edges']
 
@@ -725,7 +737,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         key=within_key(sub_idx,simplified,method)
         if trigger=="within-btn":
             if not n_sub or not in_family:
-                return 0,no_update,"Find a K_3,3 or K_5 minor first.",not running
+                return 0,no_update,"Find a K_3,3, K_5 minor or theta curve first.",not running
             compute_within(sub_idx,simplified,method)
             return 0,(version or 0)+1,within_status(sub_idx,simplified,method,0),not running
         if trigger=="within-poll":
@@ -988,7 +1000,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             obs=expand_k5_embedding(obs)
             obs_pos_3d={n:obs.nodes[n]['coords'] for n in obs}
             return build_3d_figure(obs,obs_pos_3d,show_grid=show_grid,thickness=thickness,font_size=font_size)
-        obs_pos_3d={n:node_pos_3d[n] for n in obs.nodes()} if not state['planar'] else {}
+        obs_pos_3d={n:node_pos_3d[n] for n in obs.nodes()} if obs is not None else {}
         return build_3d_figure(obs,obs_pos_3d,edge_colors={**edge_color_map(obs,attr),**rainbow_colors},show_grid=show_grid,thickness=thickness,font_size=font_size)
 
     @app.callback(
@@ -1008,7 +1020,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if triggered!="run-homfly-btn":
             return ""
 
-        if state.get('planar'):
+        if state.get('planar') and not (state.get('obs_method')=="theta" and state.get('multi_subgraphs')):
             return "Planar graph (no obstruction)"
 
         g=state.get('G')
@@ -1080,19 +1092,22 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     @app.callback(
         Output("theta-result","children"),
         Input("run-theta-btn","n_clicks"),
-        State("theta-method","value"),
-        State("subgraph-index","data"),
-        State("mode","value"),
-        State("simplify-subgraph","value"),
+        Input("subgraph-index","data"),
+        Input("graph-version","data"),
+        Input("mode","value"),
+        Input("simplify-subgraph","value"),
+        Input("theta-method","value"),
         prevent_initial_call=True)
-    def classify_theta(_clicks,tmethod,idx,mode,simplify_subgraph):
+    def classify_theta(_clicks,idx,_version,mode,simplify_subgraph,tmethod):
+        if ctx.triggered_id!="run-theta-btn":
+            return ""
         g=state.get('G')
         if not g:
             return ""
         is_simplified="on" in (simplify_subgraph or [])
         multi_subgraphs=state.get('multi_subgraphs',[])
         if mode=="multi" and multi_subgraphs:
-            target=displayed_subgraph(idx%len(multi_subgraphs),is_simplified,"kmt")
+            target=displayed_subgraph((idx or 0)%len(multi_subgraphs),is_simplified,"kmt")
         elif state.get('obs') is not None and not state.get('planar'):
             target=state['obs']
             if is_simplified:
@@ -1102,7 +1117,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if target is None:
             return "No graph to classify"
         try:
-            candidates=[target] if is_theta_graph(target) else find_theta_subgraphs(
+            candidates=[target] if is_theta_graph(target) else cached_theta_subgraphs(
                 target,limit=MAX_THETA_CURVES+1)
             if not candidates:
                 return "No theta curves found in the shown graph"
@@ -1110,7 +1125,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             candidates=candidates[:MAX_THETA_CURVES]
             labels=[]
             for candidate in candidates:
-                res=classify_theta_curve(candidate,state.get('node_pos_3d'),method=tmethod)
+                res=cached_theta_classification(candidate,state.get('node_pos_3d'),method=tmethod)
                 name=res['name'] or "unlisted"
                 chir={'+':' (+)','-':' (mirror, -)'}.get(res['chirality'],'')
                 labels.append(f"{name}{chir}")
