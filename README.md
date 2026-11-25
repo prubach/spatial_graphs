@@ -79,6 +79,7 @@ python dash_graphs.py
 
 For identified knotted loops check if those graphs are the same as one of the Kuratowski subgraphs using both OGDF and SageMath or a K_5 minor and report it in the "Knotted loops" panel.
 The "Advanced" button in the "Find" panel (hidden by default) reveals the original controls: the OGDF / SageMath / K5 minor finder, the display modes (including "Knotted loops"), "Run HOMFLY", and the whole-graph "Find knotted loops" search.
+The controls resize to leave space for the graph; on smaller screens or when results are long, scroll inside the relevant panel to reach all its controls and output.
 
 ## Knot cache
 

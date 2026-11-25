@@ -160,7 +160,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     def make_title(t,g):
         return f"{t} - Planar: {state['planar']}, Nodes: {g.number_of_nodes()}, Edges: {g.number_of_edges()}"
 
-    GRAPH_BOX_STYLE={"width":"100%","height":"calc(100vh - 290px)","minHeight":"500px"}
+    GRAPH_BOX_STYLE={"width":"100%","height":"100%","minHeight":"0","flex":"1 1 0"}
     CONTROL_GROUP={"display":"flex","alignItems":"center","gap":"6px"}
 
     def container_style(hidden,grid):
@@ -174,7 +174,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     app=Dash(__name__, requests_pathname_prefix=_path_prefix(), routes_pathname_prefix=_path_prefix())
     FONT="'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
     PANEL={"background":"#f4f7fb","border":"1px solid #d5deea","borderRadius":"10px","padding":"5px 8px",
-           "display":"flex","flexDirection":"column","gap":"3px","minWidth":"0","flex":"1 1 auto"}
+           "display":"flex","flexDirection":"column","gap":"3px","minWidth":"0"}
     PANEL_TITLE={"fontWeight":"600","fontSize":"12px","letterSpacing":"0.06em","textTransform":"uppercase",
                  "color":"#1565c0","borderBottom":"2px solid #1976d2","paddingBottom":"1px"}
     ROW={"display":"flex","alignItems":"center","gap":"4px 6px","flexWrap":"wrap"}
@@ -184,8 +184,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     BTN_PRIMARY={**BTN,"background":"#1976d2","color":"white","border":"1px solid #1565c0","fontWeight":"600"}
     OPT={"marginRight":"8px","fontSize":"12px"}
 
-    def panel(title,*rows,style=None):
-        return html.Div([html.Div(title,style=PANEL_TITLE),*rows],style={**PANEL,**(style or {})})
+    def panel(title,*rows,class_name=None):
+        return html.Div([html.Div(title,style=PANEL_TITLE),*rows],style=PANEL,
+                        className=f"control-panel {class_name}")
 
     THICKNESS_VALUES=EDGE_THICKNESS_VALUES
     app.layout=html.Div([
@@ -212,7 +213,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Div([
         dcc.Checklist(id="merge-residues",options=[{"label":"Merge residue edges","value":"on"}],value=[],labelStyle=OPT),
         html.Button("Load",id="load-btn",n_clicks=0,style=BTN_PRIMARY),
-        ],style=ROW)),
+        ],style=ROW),class_name="data-panel"),
         panel("Find",
         html.Div([
         html.Div([
@@ -245,7 +246,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         ],style=ROW),
         html.Div([
         html.Button("Simplify",id="simplify-btn",n_clicks=0,style=BTN),
-        ],style=ROW),
+        ],id="simplify-button-row",style=ROW),
         html.Div("Orange = knotted loop within the shown subgraph (sign = handedness).",
                  style={"fontSize":"12px","color":"#607d8b"}),
         html.Button("Advanced \u25b8",id="advanced-btn",n_clicks=0,style={**BTN,"alignSelf":"flex-start"}),
@@ -257,6 +258,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         {"label":"Contracted K5","value":"k5contracted"},{"label":"K5 model (legacy)","value":"k5"}],labelStyle=OPT),
         html.Span(id="obstruction-method-error",style={"fontSize":"13px","color":"crimson"}),
         ],style=ROW),
+        html.Div([
         dcc.RadioItems(id="mode",inline=True,value="original",options=[
         {"label":"Original","value":"original"},
         {"label":"Highlight obstruction","value":"highlight"},
@@ -272,22 +274,25 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         dcc.Checklist(id="simplify-subgraph",
                       options=[{"label":"Simplify subgraph","value":"on"}],
                       value=[],labelStyle=OPT),
+        ],className="advanced-options"),
+        html.Div([
         html.Div([
         html.Button("Run HOMFLY",id="run-homfly-btn",n_clicks=0,style=BTN),
         html.Button("Find knotted loops",id="find-knots-btn",n_clicks=0,style=BTN_PRIMARY),
         html.Button("< Prev",id="knot-prev-btn",n_clicks=0,style=BTN),
         html.Button("Next >",id="knot-next-btn",n_clicks=0,style=BTN),
-        ],style={**ROW,"flexWrap":"nowrap"}),
+        ],style=ROW),
         html.Div([
         html.Button("Find theta curves",id="run-theta-btn",n_clicks=0,style=BTN,
                     title="Find theta subdivisions in the shown graph and classify them by Yamada polynomial"),
         dcc.RadioItems(id="theta-method",inline=True,value="topoly",options=[
         {"label":"topoly","value":"topoly"},{"label":"knotpy","value":"knotpy"}],labelStyle=OPT),
-        ],style={**ROW,"flexWrap":"nowrap"}),
+        ],style=ROW),
         html.Span(id="theta-result",style={"fontSize":"13px","fontWeight":"600","color":"#2e7d32"}),
         html.Span(id="homfly-result",style={"fontSize":"13px","fontWeight":"600","color":"#1565c0"}),
         html.Span(id="knot-info",style={"fontSize":"13px","color":"#37474f"}),
-        ],id="advanced-container",style={"display":"none","flexDirection":"column","gap":"3px"})),
+        ],className="advanced-actions"),
+        ],id="advanced-container",className="advanced-controls",style={"display":"none"}),class_name="find-panel"),
         panel("Appearance",
         html.Div([
         html.Label("View",style=LABEL),
@@ -321,8 +326,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Div(dcc.Slider(id="edge-thickness",min=0,max=len(THICKNESS_VALUES)-1,step=1,value=THICKNESS_VALUES.index(1),
                             marks={i:str(v) for i,v in enumerate(THICKNESS_VALUES)},included=False),
                  style={"width":"150px","paddingBottom":"4px"}),
-        ],style=ROW)),
-    ],style={"display":"flex","flexWrap":"nowrap","gap":"6px","alignItems":"stretch","marginTop":"2px"}),
+        ],style=ROW),class_name="appearance-panel"),
+    ],className="control-panels"),
     html.Div(id="edge-color-legend",style={"margin":"2px 0"}),
     dcc.Store(id="graph-version",data=0),
     dcc.Store(id="rot3d",data=[0,0,0]),
@@ -335,13 +340,15 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     dcc.Interval(id="knot-poll",interval=2000,disabled=True),
     cyto.Cytoscape(id="graph",layout={"name":"preset"},stylesheet=STYLE,style=container_style(False,False)),
     dcc.Graph(id="graph-3d",style=container_style(True,False),config={"displayModeBar":False}),
-    ],style={"fontFamily":FONT,"padding":"4px 10px"})
+    ],className="app-layout",style={"fontFamily":FONT})
 
-    @app.callback(Output("advanced-container","style"),Output("advanced-btn","children"),Input("advanced-btn","n_clicks"))
+    @app.callback(Output("advanced-container","style"),Output("advanced-btn","children"),
+                  Output("simplify-button-row","style"),Input("advanced-btn","n_clicks"))
     def toggle_advanced(n):
         show=bool(n and n%2)
-        return ({"display":"flex","flexDirection":"column","gap":"3px"} if show else {"display":"none"},
-                "Advanced \u25be" if show else "Advanced \u25b8")
+        return ({"display":"grid"} if show else {"display":"none"},
+                "Advanced \u25be" if show else "Advanced \u25b8",
+                {"display":"none"} if show else ROW)
 
     @app.callback(Output("topoly-reduce-container","style"),Input("source-type","value"))
     def toggle_topoly_reduce(source_type):
