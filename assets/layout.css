@@ -1,0 +1,61 @@
+body {
+    margin: 0;
+}
+
+.app-layout {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    padding: 4px 10px;
+}
+
+.control-panels {
+    display: grid;
+    grid-template-columns: minmax(190px, 1fr) minmax(0, 3fr) minmax(210px, 1.2fr);
+    gap: 6px;
+    align-items: stretch;
+    margin-top: 2px;
+    max-height: 50vh;
+    min-height: 0;
+}
+
+.control-panel {
+    overflow-y: auto;
+}
+
+.advanced-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 3px 8px;
+}
+
+.advanced-controls > :first-child {
+    grid-column: 1 / -1;
+}
+
+.advanced-options,
+.advanced-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+@media (max-width: 800px) {
+    .control-panels {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .find-panel {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+}
+
+@media (max-width: 480px) {
+    .advanced-controls {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
