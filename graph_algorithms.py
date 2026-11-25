@@ -779,7 +779,7 @@ def find_obstructions(graph, method="ogdf", **kwargs):
     if method == "k33":
         return find_k33_subgraphs(graph)
     if method == "k5":
-        return find_k5_minors(graph)
+        return find_k5_minors(graph, **kwargs)
     if method == "k5contracted":
         return find_contracted_k5_minors(graph, **kwargs)
     if method == "k33knot":

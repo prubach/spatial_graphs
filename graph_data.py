@@ -1,6 +1,9 @@
 """Loading and converting the graph data used by the application."""
 
 import os
+import re
+import tempfile
+from urllib.request import urlopen
 
 import networkx as nx
 import topoly as tp
@@ -70,12 +73,38 @@ def load_graph_by_id(pdbid,is_topoly,reduce=TopolyReduce.INTERNAL,numbering='aut
     pdbid,chain = split_pdbid_chain(pdbid)
     G,label=_load_graph(pdbid,chain,is_topoly,reduce,numbering)
     return (merge_residue_nodes(G) if merge_residues else G),label
+
+def _ensure_cif(pdbid):
+    """Fetch and validate an RCSB coordinate file if it is not already present."""
+    pdbid = pdbid.upper()
+    if not re.fullmatch(r'[0-9][A-Z0-9]{3}', pdbid):
+        raise ValueError(f'Invalid PDB ID: {pdbid}')
+    path = os.path.join('data', f'{pdbid}.cif')
+    if os.path.isfile(path):
+        return path
+    import gemmi
+    os.makedirs('data', exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f'.{pdbid}-', suffix='.cif', dir='data')
+    try:
+        with os.fdopen(fd, 'wb') as out, urlopen(f'https://files.rcsb.org/download/{pdbid}.cif', timeout=60) as response:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+        block = gemmi.cif.read(temporary).sole_block()
+        if block.name.upper() != pdbid or not block.find_values('_atom_site.Cartn_x'):
+            raise ValueError(f'RCSB response is not a coordinate CIF for {pdbid}')
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return path
+
 def _load_graph(pdbid,chain,is_topoly,reduce,numbering):
     if is_topoly:
-        #  chain='A',
-        #return topoly_graph_to_networkx(f'{pdbid.upper()}.cif', chain=chain, bridge_type='all', reduce=reduce), 'Topoly'
-        ext = 'cif' if os.path.exists(f'data/{pdbid.upper()}.cif') else 'pdb'
-        return topoly_graph_to_networkx(f'{pdbid.upper()}.{ext}', chain=chain, bridge_type='all', reduce=reduce,
+        _ensure_cif(pdbid)
+        return topoly_graph_to_networkx(f'{pdbid.upper()}.cif', chain=chain, bridge_type='all', reduce=reduce,
                                         numbering=numbering), 'Topoly'
     return read_simlified_graph_from_file(f"data/{pdbid.upper()}-{chain}_simplified.json",
                                            chain=chain), 'Simplified'
@@ -200,7 +229,7 @@ def topoly_graph_to_networkx(input_file, chain='A', bridge_type='all', reduce=To
                 edges.append([seq[n], seq[n + 1], 'CA'])
     G = nx.Graph()
     nodes = set(e for edge in edges for e in edge[:2])
-    for n in nodes:
+    for n in sorted(nodes):
         res, _, atom = n.partition('_')
         coords = atom_coords.get(n) or g.atoms.get((int(res), atom))
         G.add_node(n, coords=coords)

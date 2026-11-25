@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from xml.sax.saxutils import escape
 
 import graph_algorithms as ga
+from graph_data import TopolyReduce
 
 
 VERSION = 1
@@ -43,7 +44,7 @@ def graph_identity(graph, positions, params):
             raise ValueError(f'Missing 3D coordinates for report node {node}')
         coordinates.append([float(c) for c in coords])
     settings = {key: params.get(key) for key in ('pdbid', 'chain', 'source', 'reduce', 'numbering', 'merge_residues')}
-    if not settings['pdbid'] or not settings['chain'] or settings['source'] != 'simplified':
+    if not settings['pdbid'] or not settings['chain'] or settings['source'] not in ('simplified', 'topoly'):
         return None
     identity = [VERSION, settings, keys, coordinates,
                 sorted((min(index[u], index[v]), max(index[u], index[v]),
@@ -143,7 +144,9 @@ def _pdf_bytes(report):
     body = [Paragraph('Spatial graph report', styles['Title']),
             Paragraph(escape(f"{report['structure']['pdbid']} chain {report['structure']['chain']}"), styles['Heading2']),
             Paragraph(escape(f"Generated: {report['generated_at']}"), styles['BodyText']),
-            Paragraph(escape(f"Source: {report['structure']['source']}; numbering: {report['structure']['numbering']}; "
+            Paragraph(escape(f"Source: {report['structure']['source']}; reduction: "
+                             f"{'Internal' if str(report['structure']['reduce']) == str(TopolyReduce.INTERNAL) else report['structure']['reduce']}; "
+                             f"numbering: {report['structure']['numbering']}; "
                              f"merged residues: {'yes' if report['structure']['merge_residues'] else 'no'}"),
                       styles['BodyText']),
             Paragraph(escape(f"Graph: {report['graph']['nodes']} nodes, {report['graph']['edges']} edges"),
@@ -192,7 +195,7 @@ def _pdf_bytes(report):
                     styles['BodyText']))
                 analyses = [entry.get('analysis', {}).get(view, {}) for entry in results]
                 completed = [analysis for analysis in analyses
-                             if analysis.get('status') == 'complete' and 'knotted_loops' in analysis]
+                             if analysis.get('status') in ('complete', 'partial') and 'knotted_loops' in analysis]
                 if completed:
                     counts, loop_count, without_knots = _subgraph_knot_summary(completed)
                     types = ', '.join(f'{label}: {count}' for label, count in sorted(counts.items())) or 'none'
@@ -212,13 +215,12 @@ def _pdf_bytes(report):
     return buffer.getvalue()
 
 
-def publish_section(graph, positions, params, key, section):
-    """Atomically publish a JSON/PDF pair, merging previously completed sections."""
+def _update_section(graph, positions, params, key, update):
     if key not in SECTIONS:
         raise ValueError(f'Unknown report section: {key}')
     location = report_location(graph, positions, params)
     if location is None:
-        raise ValueError('Reports require a simplified structure and chain')
+        raise ValueError('Reports require a structure and chain with a supported source and reduction')
     os.makedirs(location, exist_ok=True)
     with open(os.path.join(location, '.lock'), 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -232,6 +234,7 @@ def publish_section(graph, positions, params, key, section):
                              for name, (title, limits) in SECTIONS.items()},
             }
         title, limits = SECTIONS[key]
+        section = update(report['sections'][key])
         report['sections'][key] = {'title': title, 'limitations': limits, **section}
         report['generated_at'] = datetime.now(timezone.utc).isoformat()
         json_bytes = json.dumps(report, indent=2, ensure_ascii=True, allow_nan=False).encode('utf-8')
@@ -241,6 +244,74 @@ def publish_section(graph, positions, params, key, section):
         _atomic_write(os.path.join(location, f'{digest}.v{PDF_VERSION}.pdf'), pdf_bytes)
         _atomic_write(os.path.join(location, 'latest.json'),
                       json.dumps({'version': VERSION, 'digest': digest, 'pdf_version': PDF_VERSION}).encode())
+
+def publish_section(graph, positions, params, key, section):
+    """Atomically publish a JSON/PDF pair, merging previously completed sections."""
+    _update_section(graph, positions, params, key, lambda _: section)
+
+
+def _result_key(data):
+    """Match the same embedded subgraph independent of node/edge iteration order."""
+    nodes = sorted(json.dumps(node, sort_keys=True) for node in data['nodes'])
+    edges = []
+    for edge in data['edges']:
+        edge = dict(edge)
+        edge['source'], edge['target'] = sorted((edge['source'], edge['target']))
+        edges.append(json.dumps(edge, sort_keys=True))
+    return json.dumps([data.get('kind'), nodes, sorted(edges)], sort_keys=True)
+
+
+def publish_found(graph, positions, params, key, subgraphs):
+    """Record an interactive family search while retaining analyses of matching results."""
+    entries = [{'index': i + 1, 'graph': graph_data(sub),
+                'analysis': {'original': {'status': 'not_precomputed'},
+                             'simplified': {'status': 'not_precomputed'}}}
+               for i, sub in enumerate(subgraphs)]
+    def merge(old):
+        previous = {_result_key(entry['graph']): entry for entry in old.get('results', [])}
+        matched = set()
+        for entry in entries:
+            key = _result_key(entry['graph'])
+            prior = previous.get(key)
+            if prior:
+                matched.add(key)
+                entry['analysis'] = prior.get('analysis', entry['analysis'])
+                for attr in ('theta_classification', 'theta_classification_error'):
+                    if attr in prior['graph'] and attr not in entry['graph']:
+                        entry['graph'][attr] = prior['graph'][attr]
+        entries.extend(entry for key, entry in previous.items() if key not in matched)
+        for i, entry in enumerate(entries):
+            entry['index'] = i + 1
+        complete = not entries or all(
+            all(entry['analysis'].get(view, {}).get('status') == 'complete'
+                for view in ('original', 'simplified')) for entry in entries)
+        return {'status': 'complete' if complete else 'partial', 'results': entries}
+    _update_section(graph, positions, params, key, merge)
+
+
+def update_found(graph, positions, params, key, subgraph, view=None, detail=None, classification=None):
+    """Merge a later analysis into the matching result, under the report lock."""
+    result_key = _result_key(graph_data(subgraph))
+    def merge(section):
+        for entry in section.get('results', []):
+            if _result_key(entry['graph']) != result_key:
+                continue
+            if classification is not None:
+                entry['graph']['theta_classification'] = classification
+                entry['graph'].pop('theta_classification_error', None)
+            if view is not None:
+                current = entry['analysis'].get(view, {'status': 'not_precomputed'})
+                entry['analysis'][view] = {**current, **detail}
+                if current.get('status') == 'complete' and detail.get('status') == 'partial':
+                    entry['analysis'][view]['status'] = 'complete'
+                if 'knotted_loops' in entry['analysis'][view] and 'homfly' in entry['analysis'][view]:
+                    entry['analysis'][view]['status'] = 'complete'
+            section['status'] = ('complete' if all(
+                all(item.get('analysis', {}).get(v, {}).get('status') == 'complete'
+                    for v in ('original', 'simplified')) for item in section['results']) else 'partial')
+            break
+        return section
+    _update_section(graph, positions, params, key, merge)
 
 
 def _report_manifest(graph, positions, params):

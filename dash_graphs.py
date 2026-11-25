@@ -19,6 +19,7 @@ from graph_algorithms import (
     KNOT_CACHE_DIR,
     _HOMFLY_LOCK,
     _evaluate_subgraph_knot_worker,
+    _checked_homfly_label,
     _find_k5_minor,
     _find_knotted_loops,
     _find_multiple_kuratowski_subgraphs_sage,
@@ -142,7 +143,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     def recompute(g,method="ogdf",params=None):
         node_pos_3d=get_node_positions_3d(g)
         pos={n:(coord[0],coord[1]) for n,coord in node_pos_3d.items()}
-        state.update(G=g,pos=pos,node_pos_3d=node_pos_3d,knotted_loops=[],within_cache={},within_job=None,obs_method=method,graph_params=params or {},
+        state.update(G=g,pos=pos,node_pos_3d=node_pos_3d,knotted_loops=[],within_cache={},within_job=None,obs_method=method,graph_params=params or {},report_write_error=None,
                      **compute_obstructions(g,pos,method))
     recompute(G,params=dict(pdbid=split_pdbid_chain(pdbid)[0] or None,chain=split_pdbid_chain(pdbid)[1] if pdbid else None,source="topoly" if is_topoly else "simplified",
                             reduce=str(TopolyReduce.INTERNAL),numbering="auth",merge_residues=False))
@@ -364,9 +365,11 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                   Output("report-status","children"),Input("graph-version","data"),Input("report-poll","n_intervals"))
     def report_availability(_version,_interval):
         try:
+            error=state.get('report_write_error')
             report=structure_reports.load_report(state['G'],state.get('node_pos_3d'),state.get('graph_params',{}))
             if report is None:
-                return True,True,"No matching precomputed report."
+                return True,True,(f"Report update failed: {error}" if error else
+                                  "No matching report yet; find subgraphs or knotted loops to create one.")
             sections=report['sections'].values()
             completed=sum(s['status'] in ('complete','partial') for s in sections)
             if not completed:
@@ -374,7 +377,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             if structure_reports.report_paths(state['G'],state.get('node_pos_3d'),state.get('graph_params',{})) is None:
                 return False,True,"Report PDF needs updating; run precomputation or refresh reports."
             incomplete=sum(s['status'] != 'complete' for s in report['sections'].values())
-            text=f"Precomputed report available ({incomplete} incomplete or missing sections)." if incomplete else "Precomputed report available."
+            text=f"Report available ({incomplete} incomplete or missing sections)." if incomplete else "Report available."
+            if error:
+                text+=f" Latest update failed: {error}"
             return False,False,text
         except (OSError,ValueError,KeyError,TypeError) as e:
             return True,True,f"Report unavailable: {e}"
@@ -387,7 +392,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             graph,positions,params=state['G'],state.get('node_pos_3d'),state.get('graph_params',{})
             report=structure_reports.load_report(graph,positions,params)
             if report is None or not any(s['status'] in ('complete','partial') for s in report['sections'].values()):
-                return no_update,"No matching precomputed report."
+                return no_update,"No matching report."
             ext='json' if ctx.triggered_id=='report-json-btn' else 'pdf'
             if ext=='json':
                 path=structure_reports.report_json_path(graph,positions,params)
@@ -408,6 +413,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     @app.callback(Output("title-text","children"),Output("edge-color-attr","options"),
     Output("edge-color-attr","value"),Output("mode","value"),
     Output("subgraph-index","data",allow_duplicate=True),Output("graph-version","data"),
+    Output("report-error","children",allow_duplicate=True),
     Input("load-btn","n_clicks"),Input("pdbid-input","value"),Input("merge-residues","value"),
     State("pdbid-input","value"),State("source-type","value"),State("topoly-reduce","value"),State("topoly-numbering","value"),
     State("graph-version","data"),State("obstruction-method","value"),
@@ -415,14 +421,17 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     def load_new_graph(n_clicks,pdbid_input,merge,pdbid_value,source_type,reduce_value,numbering,version,obs_method):
         if not pdbid_value:
             raise PreventUpdate
-        g,tit=load_graph_by_id(pdbid_value,source_type=="topoly",reduce_value,numbering,bool(merge))
+        try:
+            g,tit=load_graph_by_id(pdbid_value,source_type=="topoly",reduce_value,numbering,bool(merge))
+        except Exception as e:
+            return no_update,no_update,no_update,no_update,no_update,no_update,f"Structure load failed: {e}"
         print(f'nodes: {sorted(g.nodes())}')
         print(f'edges: {sorted(g.edges())}')
         print('--------------------------------------------')
         recompute(g,obs_method or "ogdf",dict(pdbid=split_pdbid_chain(pdbid_value)[0],chain=split_pdbid_chain(pdbid_value)[1],source=source_type,reduce=str(reduce_value),
                                                numbering=numbering,merge_residues=bool(merge)))
         options=[{"label":"None","value":"none"}]+[{"label":a,"value":a} for a in edge_attr_keys(g)]
-        return make_title(f"{pdbid_value}-{tit}",g),options,"type" if "type" in edge_attr_keys(g) else "none","original",0,(version or 0)+1
+        return make_title(f"{pdbid_value}-{tit}",g),options,"type" if "type" in edge_attr_keys(g) else "none","original",0,(version or 0)+1,""
 
     @app.callback(Output("graph-version","data",allow_duplicate=True),Output("subgraph-index","data",allow_duplicate=True),
     Output("obstruction-method-error","children"),Output("obstruction-method","value"),
@@ -541,6 +550,18 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         try:
             loops=find_knotted_loops(graph,node_pos_3d,tries=500,params=params)
             job['result']=annotate_knotted_loops(graph,loops)
+            if params.get('pdbid') and params.get('chain'):
+                try:
+                    cache=_read_json(_knot_cache_path(graph,node_pos_3d,500,params=params))
+                    if not isinstance(cache,dict) or not isinstance(cache.get('loops_analyzed'),list):
+                        raise RuntimeError("Completed loop analysis is unavailable in the cache")
+                    for entry in cache['loops_analyzed']:
+                        _checked_homfly_label(entry.get('homfly'), 'a searched cycle')
+                    structure_reports.publish_section(graph,node_pos_3d,params,'knotted_loops',
+                        {'status':'complete','results':[structure_reports.loop_data(loop) for loop in loops]})
+                except Exception as e:
+                    if state.get('G') is graph:
+                        state['report_write_error']=str(e)
         except Exception as e:
             job['error']=str(e)
         job['running']=False
@@ -638,13 +659,24 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if representation=="contracted" and method in ("k5","k5knot"):
             method+="contracted"
         extra=dict(node_pos_3d=state.get('node_pos_3d'),params=dict(state.get('graph_params',{}))) if method in ("k33knot","k5knot","k5knotcontracted") else {}
+        if method in ("k5","k5knot"):
+            extra['raise_on_timeout']=True
         try:
             res=compute_obstructions(state['G'],state['pos'],method,**extra)
         except Exception as e:
             return no_update,no_update,no_update,no_update,f"{FAMILY_LABELS[method]} search failed: {e}"
         state.update(res,obs_method=method,within_cache={},within_job=None)
+        message=""
+        params=state.get('graph_params',{})
+        if params.get('pdbid') and params.get('chain'):
+            try:
+                structure_reports.publish_found(state['G'],state.get('node_pos_3d'),params,method,res['multi_subgraphs'])
+                state['report_write_error']=None
+            except Exception as e:
+                state['report_write_error']=str(e)
+                message=f"Search completed, but report update failed: {e}"
         found=bool(res['multi_subgraphs'])
-        return (version or 0)+1,0,"multi" if found else "original",["on"] if found else [],""
+        return (version or 0)+1,0,"multi" if found else "original",["on"] if found else [],message
 
     @app.callback(Output("simplify-subgraph","value"),Output("selected-obstruction-only","value",allow_duplicate=True),
     Input("simplify-btn","n_clicks"),State("simplify-subgraph","value"),State("selected-obstruction-only","value"),
@@ -680,8 +712,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         cache=state.setdefault('within_cache',{})
         key=within_key(idx,simplified,method)
         if key not in cache:
+            graph=state['G']
+            positions=state.get('node_pos_3d')
+            params=dict(state.get('graph_params',{}))
+            family=state['obs_method']
+            subs=state['multi_subgraphs']
             try:
-                sub=state['multi_subgraphs'][idx]
+                sub=subs[idx]
                 loops=sub.graph.get('knotted_loops') if not simplified else None
                 disagreements=sub.graph.get('contraction_disagreements') if loops is not None else None
                 pairs=sub.graph.get('contraction_disagreement_pairs',[]) if loops is not None else []
@@ -696,6 +733,25 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                 cache[key]=dict(loops=loops,contraction_disagreements=disagreements,contraction_disagreement_pairs=pairs)
             except Exception as e:
                 cache[key]=dict(loops=[],error=str(e))
+            if 'error' not in cache[key] and params.get('pdbid') and params.get('chain') and state.get('multi_subgraphs') is subs:
+                try:
+                    shown=displayed_subgraph(idx,simplified,method)
+                    if sub.graph.get('knotted_loops') is None or simplified:
+                        loop_params=dict(params,within=family,subgraph_index=idx,simplified=simplified,
+                                         simplify_method=method if simplified else None)
+                        saved=_read_json(_knot_cache_path(shown,positions,500,params=loop_params))
+                        if not isinstance(saved,dict) or not isinstance(saved.get('loops_analyzed'),list):
+                            raise RuntimeError("Completed subgraph loop analysis is unavailable in the cache")
+                        for entry in saved['loops_analyzed']:
+                            _checked_homfly_label(entry.get('homfly'), 'a searched subgraph cycle')
+                    detail={'status':'partial','graph':structure_reports.graph_data(shown),
+                            'knotted_loops':[structure_reports.loop_data(loop,shown) for loop in loops],
+                            'contraction_disagreements':disagreements,'contraction_disagreement_pairs':pairs}
+                    structure_reports.update_found(graph,positions,params,family,sub,
+                                                   'simplified' if simplified else 'original',detail)
+                except Exception as e:
+                    if state.get('G') is graph:
+                        state['report_write_error']=str(e)
         return cache[key]
 
     def run_within_job(job,start,method):
@@ -1149,6 +1205,16 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if knot_type is None:
             return "HOMFLY test failed (crashed, timed out or inconclusive)"
         label=f"knot_type: {knot_type}{' (unknot)' if knot_type=='0_1' else ''}, probability: {prob:.3f}"
+        if mode=="multi" and multi_subgraphs and state.get('obs_method') in FAMILY_LABELS:
+            params=state.get('graph_params',{})
+            if params.get('pdbid') and params.get('chain'):
+                try:
+                    structure_reports.update_found(g,state.get('node_pos_3d'),params,state['obs_method'],
+                        multi_subgraphs[actual_idx], 'simplified' if is_simplified else 'original',
+                        {'status':'partial','homfly':{'knot':knot_type,'probability':prob}})
+                except Exception as e:
+                    state['report_write_error']=str(e)
+                    label+=f" Report update failed: {e}"
         if warning:
             return [label,html.Strong(warning,style={"color":"#b71c1c"})]
         return label
@@ -1193,6 +1259,26 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                 name=res['name'] or "unlisted"
                 chir={'+':' (+)','-':' (mirror, -)'}.get(res['chirality'],'')
                 labels.append(f"{name}{chir}")
+                if target is g:
+                    candidate.graph['theta_classification']=res
+                if (mode=="multi" and not is_simplified and state.get('obs_method')=="theta"
+                        and len(candidates)==1 and candidate is target):
+                    params=state.get('graph_params',{})
+                    if params.get('pdbid') and params.get('chain'):
+                        try:
+                            structure_reports.update_found(g,state.get('node_pos_3d'),params,'theta',
+                                multi_subgraphs[(idx or 0)%len(multi_subgraphs)],classification=res)
+                        except Exception as e:
+                            state['report_write_error']=str(e)
+                            labels[-1]+=f" (report update failed: {e})"
+            if target is g:
+                params=state.get('graph_params',{})
+                if params.get('pdbid') and params.get('chain'):
+                    try:
+                        structure_reports.publish_found(g,state.get('node_pos_3d'),params,'theta',candidates)
+                    except Exception as e:
+                        state['report_write_error']=str(e)
+                        labels[-1]+=f" (report update failed: {e})"
         except Exception as e:
             return f"Theta classification failed: {e}"
         result=f"Found {len(candidates)} theta curve(s): {', '.join(labels)} [Yamada, {tmethod}]"

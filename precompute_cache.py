@@ -1,14 +1,15 @@
-"""Precompute graph analyses and JSON/PDF reports for simplified structures and chains.
+"""Precompute graph analyses and JSON/PDF reports for structures and chains.
 
-For every structure and chain that has simplified files in data/ this computes, as the app does,
+For simplified and Topoly/Internal inputs available in data/ this computes, as the app does,
 the whole-graph knotted loops, the four obstruction families (k33, k5, k33knot, k5knot) and for
 each obstruction the knotted loops within it (original and simplified) and its HOMFLY knot type.
 Results already in the cache are reused, so the script can be interrupted and restarted.
 
-Usage: python precompute_cache.py [PDBID[CHAIN] ...] [--methods k33 k5 k5contracted theta ...] [--no-subgraphs] [-j JOBS]
+Usage: python precompute_cache.py [PDBID[CHAIN] ...] [--source simplified|topoly|both] [--methods k33 k5 k5contracted theta ...] [--no-subgraphs] [-j JOBS]
 """
 import argparse
 import os
+import re
 import sys
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 
@@ -36,6 +37,11 @@ def simplified_ids():
     return ids
 
 
+def topoly_ids():
+    """Selectable structure/chain IDs; missing coordinate files are fetched on load."""
+    return list_data_pdbids()
+
+
 _STATE = {}
 
 
@@ -49,21 +55,25 @@ def _validated_loops(graph, positions, params):
     return loops
 
 
-def _context(pdbid):
+def _context(pdbid, source="simplified"):
     """Per-process cached graph, node positions and cache params of a structure."""
-    if pdbid not in _STATE:
+    if source not in ("simplified", "topoly"):
+        raise ValueError(f"Unsupported source: {source}")
+    key = (pdbid, source)
+    if key not in _STATE:
         pid, chain = split_pdbid_chain(pdbid)
-        G, _ = load_graph_by_id(pdbid, False)
-        params = dict(pdbid=pid, chain=chain, source="simplified", reduce=str(TopolyReduce.INTERNAL),
+        G, _ = load_graph_by_id(pdbid, source == "topoly", reduce=TopolyReduce.INTERNAL,
+                                numbering="auth", merge_residues=False)
+        params = dict(pdbid=pid, chain=chain, source=source, reduce=str(TopolyReduce.INTERNAL),
                       numbering="auth", merge_residues=False)
-        _STATE[pdbid] = (G, get_node_positions_3d(G), params)
-    return _STATE[pdbid]
+        _STATE[key] = (G, get_node_positions_3d(G), params)
+    return _STATE[key]
 
 
-def find_task(pdbid, method):
+def find_task(pdbid, method, source="simplified"):
     """Find the obstructions of one family."""
-    G, node_pos_3d, params = _context(pdbid)
-    _log(f"{pdbid}: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+    G, node_pos_3d, params = _context(pdbid, source)
+    _log(f"{pdbid} {source}: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
     if method in ("k33knot", "k5knot"):
         _validated_loops(G, node_pos_3d, params)
     kwargs = dict(node_pos_3d=node_pos_3d, params=dict(params)) if method in ("k33knot", "k5knot", "k5knotcontracted") else {}
@@ -89,8 +99,8 @@ def find_task(pdbid, method):
     return subs
 
 
-def subgraph_task(pdbid, method, idx, sub, simplified):
-    G, node_pos_3d, params = _context(pdbid)
+def subgraph_task(pdbid, method, idx, sub, simplified, source="simplified"):
+    G, node_pos_3d, params = _context(pdbid, source)
     selected = expand_k5_embedding(sub) if sub.graph.get('kind') == 'contracted K_5 minor' else G.edge_subgraph(sub.edges())
     shown = simplify_subgraph_topoly(selected, node_pos_3d, method=SIMPLIFY_METHOD) if simplified \
         else selected
@@ -108,23 +118,32 @@ def subgraph_task(pdbid, method, idx, sub, simplified):
             'contraction_disagreement_pairs': shown.graph.get('contraction_disagreement_pairs')}
 
 
-def whole_graph_task(pdbid):
-    G, positions, params = _context(pdbid)
+def whole_graph_task(pdbid, source="simplified"):
+    G, positions, params = _context(pdbid, source)
     return [reports.loop_data(loop) for loop in _validated_loops(G, positions, params)]
 
 
-def run(ids, methods, subgraphs, jobs):
+def run(ids, methods, subgraphs, jobs, source="simplified"):
     failures = []
+    available = []
+    for pdbid in ids:
+        try:
+            _context(pdbid, source)
+        except Exception as e:
+            failures.append(f'{pdbid} {source} loading: {e}')
+            _log(f'{pdbid} {source}: loading failed: {e}')
+        else:
+            available.append(pdbid)
     with ProcessPoolExecutor(max_workers=jobs) as ex:
-        pending = {ex.submit(find_task, pdbid, method): ('find', pdbid, method)
-                   for pdbid in ids for method in methods}
-        pending.update({ex.submit(whole_graph_task, pdbid): ('whole', pdbid, None) for pdbid in ids})
+        pending = {ex.submit(whole_graph_task, pdbid, source): ('whole', pdbid, None) for pdbid in available}
+        pending.update({ex.submit(find_task, pdbid, method, source): ('find', pdbid, method)
+                        for pdbid in available for method in methods})
         sections = {}
 
         def publish(pdbid, method, section):
-            graph, positions, params = _context(pdbid)
+            graph, positions, params = _context(pdbid, source)
             reports.publish_section(graph, positions, params, method, section)
-            _log(f'{pdbid}: report updated ({method})')
+            _log(f'{pdbid} {source}: report updated ({method})')
 
         while pending:
             finished, _ = wait(pending, return_when=FIRST_COMPLETED)
@@ -134,7 +153,7 @@ def run(ids, methods, subgraphs, jobs):
                     try:
                         section = {'status': 'complete', 'results': future.result()}
                     except Exception as e:
-                        failures.append(f'{pdbid} knotted loops: {e}')
+                        failures.append(f'{pdbid} {source} knotted loops: {e}')
                         section = {'status': 'failed', 'error': str(e)}
                     publish(pdbid, 'knotted_loops', section)
                 elif kind == 'find':
@@ -142,7 +161,7 @@ def run(ids, methods, subgraphs, jobs):
                     try:
                         found = future.result()
                     except Exception as e:
-                        failures.append(f'{pdbid} {method}: {e}')
+                        failures.append(f'{pdbid} {source} {method}: {e}')
                         publish(pdbid, method, {'status': 'failed', 'error': str(e)})
                         continue
                     entries = [{'index': idx + 1, 'graph': reports.graph_data(sub),
@@ -152,7 +171,7 @@ def run(ids, methods, subgraphs, jobs):
                     missing_classification = any('theta_classification_error' in sub.graph for sub in found)
                     for idx, sub in enumerate(found):
                         if 'theta_classification_error' in sub.graph:
-                            failures.append(f"{pdbid} theta #{idx + 1}: {sub.graph['theta_classification_error']}")
+                            failures.append(f"{pdbid} {source} theta #{idx + 1}: {sub.graph['theta_classification_error']}")
                     section = {'status': 'partial' if found or missing_classification else 'complete',
                                'results': entries}
                     sections[pdbid, method] = {'section': section, 'remaining': 2 * len(found) if subgraphs else 0,
@@ -160,7 +179,7 @@ def run(ids, methods, subgraphs, jobs):
                     if subgraphs:
                         for idx, sub in enumerate(found):
                             for simplified in (False, True):
-                                task = ex.submit(subgraph_task, pdbid, method, idx, sub, simplified)
+                                task = ex.submit(subgraph_task, pdbid, method, idx, sub, simplified, source)
                                 pending[task] = ('subgraph', pdbid, (method, idx, simplified))
                     publish(pdbid, method, section)
                 else:
@@ -169,7 +188,7 @@ def run(ids, methods, subgraphs, jobs):
                     try:
                         detail = future.result()
                     except Exception as e:
-                        failures.append(f'{pdbid} {method} #{idx + 1} simplified={simplified}: {e}')
+                        failures.append(f'{pdbid} {source} {method} #{idx + 1} simplified={simplified}: {e}')
                         detail = {'status': 'failed', 'error': str(e)}
                         state['failed'] = True
                     state['section']['results'][idx]['analysis']['simplified' if simplified else 'original'] = detail
@@ -183,7 +202,9 @@ def run(ids, methods, subgraphs, jobs):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("ids", nargs="*", help="structures, e.g. 4B56B (default: all with simplified files)")
+    ap.add_argument("ids", nargs="*", help="structures, e.g. 4B56B (default: all available chains)")
+    ap.add_argument("--source", choices=("simplified", "topoly", "both"), default="both",
+                    help="input source to precompute (default: both; Topoly uses Internal reduction)")
     ap.add_argument("--methods", nargs="+", choices=METHODS, default=list(METHODS))
     ap.add_argument("--no-subgraphs", action="store_true",
                     help="only find the obstructions, skip the knot analysis within each of them")
@@ -192,20 +213,40 @@ def main():
     ap.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 1,
                     help="number of parallel worker processes (default: all CPUs)")
     args = ap.parse_args()
-    available = simplified_ids()
-    ids = [i.upper() if len(i) <= 4 else i[:4].upper() + i[4:] for i in args.ids] or available
-    unknown = [i for i in ids if i not in available]
+    if args.jobs < 1:
+        ap.error("--jobs must be positive")
+    sources = ("simplified", "topoly") if args.source == "both" else (args.source,)
+    available = {source: (simplified_ids() if source == "simplified" else topoly_ids()) for source in sources}
+    ids = [i.upper() if len(i) <= 4 else i[:4].upper() + i[4:] for i in args.ids]
+    unknown = [i for i in ids if not any(
+        i in available[source] or (source == 'topoly' and re.fullmatch(r'[0-9][A-Z0-9]{3}[A-Za-z0-9]*', i))
+        for source in sources)]
     if unknown:
-        sys.exit(f"No simplified files for: {', '.join(unknown)}. Available: {', '.join(available)}")
-    if args.refresh_reports:
-        for pdbid in ids:
-            graph, positions, params = _context(pdbid)
-            if reports.refresh_pdf(graph, positions, params):
-                _log(f"{pdbid}: summary PDF refreshed")
-            else:
-                _log(f"{pdbid}: no existing report to refresh")
-    else:
-        run(ids, args.methods, not args.no_subgraphs, args.jobs)
+        sys.exit(f"No {args.source} input for: {', '.join(unknown)}")
+    failures = []
+    for source in sources:
+        selected = ([pid for pid in ids if source == 'topoly' or pid in available[source]]
+                    if ids else available[source])
+        for pid in ids:
+            if pid not in selected:
+                _log(f"{pid} {source}: no input available; skipping")
+        if args.refresh_reports:
+            for pdbid in selected:
+                try:
+                    graph, positions, params = _context(pdbid, source)
+                    if reports.refresh_pdf(graph, positions, params):
+                        _log(f"{pdbid} {source}: summary PDF refreshed")
+                    else:
+                        _log(f"{pdbid} {source}: no existing report to refresh")
+                except Exception as e:
+                    failures.append(f"{pdbid} {source} report refresh: {e}")
+        elif selected:
+            try:
+                run(selected, args.methods, not args.no_subgraphs, args.jobs, source)
+            except Exception as e:
+                failures.append(f"{source}: {e}")
+    if failures:
+        sys.exit('\n'.join(failures))
     _log("done")
 
 
