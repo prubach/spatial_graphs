@@ -375,7 +375,12 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             if not completed:
                 return True,True,"No completed report sections."
             if structure_reports.report_paths(state['G'],state.get('node_pos_3d'),state.get('graph_params',{})) is None:
-                return False,True,"Report PDF needs updating; run precomputation or refresh reports."
+                try:
+                    structure_reports.refresh_pdf(state['G'],state.get('node_pos_3d'),state.get('graph_params',{}))
+                except Exception as e:
+                    return False,True,f"Report PDF update failed: {e}"
+                if structure_reports.report_paths(state['G'],state.get('node_pos_3d'),state.get('graph_params',{})) is None:
+                    return False,True,"Report PDF could not be updated."
             incomplete=sum(s['status'] != 'complete' for s in report['sections'].values())
             text=f"Report available ({incomplete} incomplete or missing sections)." if incomplete else "Report available."
             if error:
@@ -398,6 +403,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                 path=structure_reports.report_json_path(graph,positions,params)
             else:
                 paths=structure_reports.report_paths(graph,positions,params)
+                if paths is None:
+                    structure_reports.refresh_pdf(graph,positions,params)
+                    paths=structure_reports.report_paths(graph,positions,params)
                 path=paths['pdf'] if paths else None
             if path is None:
                 return no_update,"Report file is not available; run precomputation or refresh reports."

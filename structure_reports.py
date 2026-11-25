@@ -15,7 +15,7 @@ from graph_data import TopolyReduce
 
 
 VERSION = 1
-PDF_VERSION = 3
+PDF_VERSION = 4
 SECTIONS = {
     'knotted_loops': ('Knotted loops', 'All simple cycles are tested using closed-loop HOMFLY.'),
     'k33': ('K_3,3 subdivisions', 'Results from the available OGDF and SageMath finders.'),
@@ -126,50 +126,99 @@ def _subgraph_knot_summary(analyses):
     return counts, loop_count, without_knots
 
 
+def _pdf_status_style(status):
+    """Return foreground and background colors for report and analysis statuses."""
+    if status == 'complete':
+        return '#17633a', '#e3f3e8'
+    if status in ('partial', 'in_progress', 'running'):
+        return '#765600', '#fff2bf'
+    if status in ('not_precomputed', 'none', 'failed', 'skipped'):
+        return '#9b2727', '#fae5e5'
+    return '#475569', '#edf1f5'
+
+
 def _pdf_bytes(report):
     from io import BytesIO
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
     buffer = BytesIO()
     styles = getSampleStyleSheet()
-    styles['BodyText'].fontSize = 9
-    styles['BodyText'].leading = 11
-    styles['Heading2'].fontSize = 11
-    styles['Heading2'].leading = 13
-    styles['Heading2'].spaceBefore = 4
-    styles['Heading2'].spaceAfter = 2
+    body_style = ParagraphStyle('ReportBody', parent=styles['BodyText'], fontSize=9, leading=13,
+                                textColor=colors.HexColor('#253449'), spaceAfter=2)
+    title_style = ParagraphStyle('ReportTitle', parent=styles['Title'], fontSize=20, leading=24,
+                                 textColor=colors.HexColor('#173b65'), alignment=0, spaceAfter=4)
+    heading_style = ParagraphStyle('ReportHeading', parent=body_style, fontName='Helvetica-Bold',
+                                   fontSize=10.5, leading=14, textColor=colors.HexColor('#173b65'))
+    note_style = ParagraphStyle('ReportNote', parent=body_style, fontName='Helvetica-Oblique',
+                                fontSize=8, leading=11, textColor=colors.HexColor('#526277'))
+    badge_style = ParagraphStyle('ReportBadge', parent=body_style, fontName='Helvetica-Bold',
+                                fontSize=8, leading=11, alignment=1)
     document = SimpleDocTemplate(buffer, title='Spatial graph report', leftMargin=36, rightMargin=36,
-                                 topMargin=30, bottomMargin=30)
-    body = [Paragraph('Spatial graph report', styles['Title']),
-            Paragraph(escape(f"{report['structure']['pdbid']} chain {report['structure']['chain']}"), styles['Heading2']),
-            Paragraph(escape(f"Generated: {report['generated_at']}"), styles['BodyText']),
-            Paragraph(escape(f"Source: {report['structure']['source']}; reduction: "
-                             f"{'Internal' if str(report['structure']['reduce']) == str(TopolyReduce.INTERNAL) else report['structure']['reduce']}; "
-                             f"numbering: {report['structure']['numbering']}; "
-                             f"merged residues: {'yes' if report['structure']['merge_residues'] else 'no'}"),
-                      styles['BodyText']),
-            Paragraph(escape(f"Graph: {report['graph']['nodes']} nodes, {report['graph']['edges']} edges"),
-                      styles['BodyText']),
-            Paragraph('The JSON report contains the full results and subgraph data.', styles['BodyText']),
-            Paragraph('Subgraph knot-type counts count each subgraph once per type; a subgraph can contain multiple '
-                      'types. Contracted K_5 knot labels describe original cycles, not necessarily the drawing.',
-                      styles['BodyText'])]
+                                 topMargin=32, bottomMargin=38)
+
+    def paragraph(label, value):
+        return Paragraph(f'<b>{escape(label)}</b> {escape(value)}', body_style)
+
+    def status_text(status):
+        return escape(str(status).replace('_', ' '))
+
+    def status_label(status):
+        fg, _ = _pdf_status_style(status)
+        return f'<font color="{fg}"><b>{status_text(status)}</b></font>'
+
+    structure = report['structure']
+    reduction = ('Internal' if str(structure['reduce']) == str(TopolyReduce.INTERNAL)
+                 else str(structure['reduce']))
+    body = [
+        Paragraph('Spatial graph report', title_style),
+        Paragraph(escape(f"{structure['pdbid']}  |  Chain {structure['chain']}"), heading_style),
+        Spacer(1, 5),
+        paragraph('Generated:', report['generated_at']),
+        paragraph('Input:', f"Source: {structure['source']}; reduction: {reduction}; "
+                           f"numbering: {structure['numbering']}; "
+                           f"merged residues: {'yes' if structure['merge_residues'] else 'no'}"),
+        paragraph('Graph:', f"{report['graph']['nodes']} nodes, {report['graph']['edges']} edges"),
+        Spacer(1, 5),
+        Paragraph('<b>Status:</b> ' + status_label('complete') + ' &nbsp; | &nbsp; '
+                  + status_label('partial') + ' &nbsp; | &nbsp; ' + status_label('not_precomputed')
+                  + ' / ' + status_label('failed') + ' / ' + status_label('skipped'), body_style),
+        Paragraph('A completed search may have zero results. Partial or missing sections do not imply '
+                  'that no results exist.', note_style),
+        Paragraph('The JSON report contains the full results and subgraph data. Knot-type counts count each '
+                  'subgraph once per type; a subgraph can contain multiple types. Contracted K_5 knot labels '
+                  'describe original cycles, not necessarily the drawing.', note_style),
+        Spacer(1, 8),
+    ]
     for key, section in report['sections'].items():
-        body.extend([Spacer(1, 3), Paragraph(escape(section['title']), styles['Heading2']),
-                     Paragraph(escape(f"Status: {section['status'].replace('_', ' ')}. "
-                                      f"{section['limitations']}"), styles['BodyText'])])
+        fg, bg = _pdf_status_style(section['status'])
+        header = Table([[Paragraph(escape(section['title']), heading_style),
+                         Paragraph(f'<font color="{fg}">{status_text(section["status"])}</font>', badge_style)]],
+                       colWidths=[document.width - 115, 115], hAlign='LEFT')
+        header.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#eef3f8')),
+            ('BACKGROUND', (1, 0), (1, 0), colors.HexColor(bg)),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 7),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 7),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        header.keepWithNext = True
+        body.extend([Spacer(1, 6), header, Paragraph(escape(section['limitations']), note_style)])
         if 'error' in section:
-            body.append(Paragraph(escape(f"Error: {section['error']}"), styles['BodyText']))
+            body.append(Paragraph(f'<font color="#9b2727"><b>Error:</b> {escape(str(section["error"]))}</font>',
+                                  body_style))
         if 'results' not in section:
             continue
         results = section['results']
-        body.append(Paragraph(f"Results found: {len(results)}", styles['BodyText']))
+        body.append(paragraph('Results found:', str(len(results))))
         if key == 'knotted_loops':
             labels = Counter(loop['knot'] for loop in results)
             if labels:
-                body.append(Paragraph(escape('Knot types: ' + ', '.join(
-                    f'{label}: {count}' for label, count in sorted(labels.items()))), styles['BodyText']))
+                body.append(paragraph('Knot types:', ', '.join(
+                    f'{label}: {count}' for label, count in sorted(labels.items()))))
         elif key == 'theta':
             classifications = Counter()
             for entry in results:
@@ -184,15 +233,15 @@ def _pdf_bytes(report):
                     label = (classification.get('chirality') or '') + name
                 classifications[label] += 1
             if classifications:
-                body.append(Paragraph(escape('Theta classifications: ' + ', '.join(
-                    f'{label}: {count}' for label, count in sorted(classifications.items()))), styles['BodyText']))
+                body.append(paragraph('Theta classifications:', ', '.join(
+                    f'{label}: {count}' for label, count in sorted(classifications.items()))))
         if key != 'knotted_loops' and results:
             for view in ('original', 'simplified'):
                 statuses = Counter(entry.get('analysis', {}).get(view, {}).get('status', 'not_precomputed')
                                    for entry in results)
-                body.append(Paragraph(escape(f"{view.capitalize()} analyses: " + ', '.join(
-                    f"{status.replace('_', ' ')}: {count}" for status, count in sorted(statuses.items()))),
-                    styles['BodyText']))
+                body.append(Paragraph(f"<b>{view.capitalize()} analyses:</b> " + ', '.join(
+                    f"{status_label(status)}: {count}" for status, count in sorted(statuses.items())),
+                    body_style))
                 analyses = [entry.get('analysis', {}).get(view, {}) for entry in results]
                 completed = [analysis for analysis in analyses
                              if analysis.get('status') in ('complete', 'partial') and 'knotted_loops' in analysis]
@@ -202,7 +251,7 @@ def _pdf_bytes(report):
                     summary = (f"{view.capitalize()} knot analysis ({len(completed)} analyzed): "
                                f"{loop_count} knotted loops; {without_knots} without knotted loops. "
                                f"Subgraphs by knot type: {types}.")
-                    body.append(Paragraph(escape(summary), styles['BodyText']))
+                    body.append(Paragraph(escape(summary), body_style))
             if key == 'k5knotcontracted':
                 search_loops = [entry['graph']['knotted_loops'] for entry in results
                                 if 'knotted_loops' in entry.get('graph', {})]
@@ -210,8 +259,19 @@ def _pdf_bytes(report):
                     counts, _, _ = _subgraph_knot_summary([{'knotted_loops': loops} for loops in search_loops])
                     types = ', '.join(f'{label}: {count}' for label, count in sorted(counts.items())) or 'none'
                     body.append(Paragraph(escape(f"Search-time original-cycle knot types "
-                                                 f"({len(search_loops)} analyzed): {types}."), styles['BodyText']))
-    document.build(body)
+                                                 f"({len(search_loops)} analyzed): {types}."), body_style))
+
+    def footer(canvas, doc):
+        canvas.saveState()
+        canvas.setStrokeColor(colors.HexColor('#d9e2ec'))
+        canvas.line(doc.leftMargin, 27, doc.pagesize[0] - doc.rightMargin, 27)
+        canvas.setFont('Helvetica', 8)
+        canvas.setFillColor(colors.HexColor('#64748b'))
+        canvas.drawString(doc.leftMargin, 16, 'Spatial graph report')
+        canvas.drawRightString(doc.pagesize[0] - doc.rightMargin, 16, f'Page {doc.page}')
+        canvas.restoreState()
+
+    document.build(body, onFirstPage=footer, onLaterPages=footer)
     return buffer.getvalue()
 
 
