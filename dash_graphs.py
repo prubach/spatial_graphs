@@ -8,6 +8,7 @@ import threading
 import networkx as nx
 import numpy as np
 import plotly.graph_objects as go
+import structure_reports
 import dash_cytoscape as cyto
 from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
@@ -213,7 +214,16 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Div([
         dcc.Checklist(id="merge-residues",options=[{"label":"Merge residue edges","value":"on"}],value=[],labelStyle=OPT),
         html.Button("Load",id="load-btn",n_clicks=0,style=BTN_PRIMARY),
-        ],style=ROW),class_name="data-panel"),
+        ],style=ROW),
+        html.Div([
+        html.Button("Report JSON",id="report-json-btn",n_clicks=0,disabled=True,style=BTN),
+        html.Button("Report PDF",id="report-pdf-btn",n_clicks=0,disabled=True,style=BTN),
+        dcc.Download(id="report-download"),
+        ],style=ROW),
+        html.Span(id="report-status",style={"fontSize":"12px","color":"#37474f"}),
+        html.Span(id="report-error",style={"fontSize":"12px","color":"crimson"}),
+        dcc.Interval(id="report-poll",interval=10000),
+        class_name="data-panel"),
         panel("Find",
         html.Div([
         html.Div([
@@ -349,6 +359,47 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         return ({"display":"grid"} if show else {"display":"none"},
                 "Advanced \u25be" if show else "Advanced \u25b8",
                 {"display":"none"} if show else ROW)
+
+    @app.callback(Output("report-json-btn","disabled"),Output("report-pdf-btn","disabled"),
+                  Output("report-status","children"),Input("graph-version","data"),Input("report-poll","n_intervals"))
+    def report_availability(_version,_interval):
+        try:
+            report=structure_reports.load_report(state['G'],state.get('node_pos_3d'),state.get('graph_params',{}))
+            if report is None:
+                return True,True,"No matching precomputed report."
+            sections=report['sections'].values()
+            completed=sum(s['status'] in ('complete','partial') for s in sections)
+            if not completed:
+                return True,True,"No completed report sections."
+            if structure_reports.report_paths(state['G'],state.get('node_pos_3d'),state.get('graph_params',{})) is None:
+                return False,True,"Report PDF needs updating; run precomputation or refresh reports."
+            incomplete=sum(s['status'] != 'complete' for s in report['sections'].values())
+            text=f"Precomputed report available ({incomplete} incomplete or missing sections)." if incomplete else "Precomputed report available."
+            return False,False,text
+        except (OSError,ValueError,KeyError,TypeError) as e:
+            return True,True,f"Report unavailable: {e}"
+
+    @app.callback(Output("report-download","data"),Output("report-error","children"),
+                  Input("report-json-btn","n_clicks"),Input("report-pdf-btn","n_clicks"),
+                  prevent_initial_call=True)
+    def download_report(_json_clicks,_pdf_clicks):
+        try:
+            graph,positions,params=state['G'],state.get('node_pos_3d'),state.get('graph_params',{})
+            report=structure_reports.load_report(graph,positions,params)
+            if report is None or not any(s['status'] in ('complete','partial') for s in report['sections'].values()):
+                return no_update,"No matching precomputed report."
+            ext='json' if ctx.triggered_id=='report-json-btn' else 'pdf'
+            if ext=='json':
+                path=structure_reports.report_json_path(graph,positions,params)
+            else:
+                paths=structure_reports.report_paths(graph,positions,params)
+                path=paths['pdf'] if paths else None
+            if path is None:
+                return no_update,"Report file is not available; run precomputation or refresh reports."
+            filename=f"{params['pdbid']}_{params['chain']}_report.{ext}"
+            return dcc.send_file(path,filename=filename),""
+        except (OSError,ValueError,KeyError,TypeError) as e:
+            return no_update,f"Report download failed: {e}"
 
     @app.callback(Output("topoly-reduce-container","style"),Input("source-type","value"))
     def toggle_topoly_reduce(source_type):

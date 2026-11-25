@@ -450,7 +450,7 @@ def find_contracted_k5_minors(graph, node_pos_3d=None, max_results=20, time_limi
     except TimeoutError as e:
         raise TimeoutError(f'Contracted K_5 search timed out after {time_limit}s; results are incomplete') from e
     return results
-def find_k5_minors(graph, max_results=20, time_limit=60):
+def find_k5_minors(graph, max_results=20, time_limit=60, raise_on_timeout=False):
     """Return up to `max_results` subgraphs, each a K_5 minor model (5 connected branch sets plus the 10 edges
     joining them). After each hit one edge of the model is deleted so the next search finds a different one."""
     work = nx.Graph(graph)
@@ -483,6 +483,8 @@ def find_k5_minors(graph, max_results=20, time_limit=60):
             results.append(model)
             work.remove_edge(*hit[0])
     except TimeoutError:
+        if raise_on_timeout:
+            raise
         log.warning('K_5 minor search stopped after %ss; %d found', time_limit, len(results))
     return results
 def enumerate_k33_subdivisions(graph, must_contain=None, limit=100000):

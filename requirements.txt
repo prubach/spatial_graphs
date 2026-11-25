@@ -7,3 +7,4 @@ dash
 ogdf-python
 ogdf-wheel
 pytest
+reportlab>=4.0
