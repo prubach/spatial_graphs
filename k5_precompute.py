@@ -16,7 +16,7 @@ import networkx as nx
 import graph_algorithms as ga
 
 
-VERSION = 3
+VERSION = 4
 CHECKPOINT_INTERVAL = 256
 
 
@@ -70,7 +70,7 @@ def _restore_result(data, graph, nodes, positions):
     model = ga._contracted_k5(graph, _decode_witness(data['witness'], nodes), positions)
     expanded = ga.expand_k5_embedding(model)
     expanded_nodes = list(expanded)
-    model.graph['sources'] = ['knotted contracted embedding']
+    model.graph['sources'] = ['knotted original cycles']
     model.graph['contraction_disagreements'] = data['contraction_disagreements']
     model.graph['contraction_disagreement_pairs'] = data['contraction_disagreement_pairs']
     model.graph['knotted_loops'] = [
@@ -202,7 +202,7 @@ def _run_precomputation(db, graph, positions, params, candidate_limit, nodes, in
                             expanded = ga.expand_k5_embedding(contracted)
                             loops = ga.find_knotted_loops(expanded, positions,
                                                           params=dict(params or {}, within='k5knotcontracted'))
-                            if loops:
+                            if loops and not expanded.graph['contraction_disagreements']:
                                 expanded_index = {n: i for i, n in enumerate(expanded)}
                                 data = {'witness': encoded_witness,
                                         'contraction_disagreements': expanded.graph['contraction_disagreements'],

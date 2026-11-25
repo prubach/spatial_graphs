@@ -27,11 +27,11 @@ The app is then available at `http://host:8014/spatialgraph/`.
 After choosing a protein, the "Find" panel works as follows:
 - "K_3,3" finds all K_3,3 subdivisions (OGDF and SageMath results are merged and deduplicated; the finder(s) that reported each one are shown). "K_5 minor" finds contracted K_5 embeddings by default.
 - "Knotted K_3,3" lists K_3,3 subdivisions that contain a knotted loop of the whole graph (at most 100, smallest first). OGDF and SageMath report only a few subdivisions, which can all be unknotted, so these are enumerated from the knotted loops.
-- "Knotted K_5 minor" tests cycles of contracted K_5 embeddings, rather than loops of their original models.
+- "Knotted K_5 minor" classifies original cycles of K_5 minor models and excludes candidates whose contracted drawing has a conflicting cycle classification.
 - "Theta curves" searches the entire loaded graph, including planar graphs, for up to 20 theta subdivisions. It finds at most one set of three internally disjoint paths per pair of branch vertices, so it is not an exhaustive enumeration of all theta curves.
 - Select "Original minor model (legacy)" to use the previous K_5 searches and display the original subgraphs. The legacy knotted search reports models containing a knotted loop before contraction; that knot need not survive contraction.
 - "Next/Prev" steps through the results. Theta curves can be shown alone or highlighted in the full structure, viewed in 2D or 3D, and exported like the other results.
-- "Knot within" looks for knotted loops inside the shown K_3,3 / K_5 minor and highlights one in orange with its knot type and handedness (e.g. +3_1 vs -3_1). "Next knot" / "Prev knot" step through them.
+- "Knot within" looks for knotted loops inside the shown K_3,3 / K_5 minor and highlights one in orange with its knot type and handedness (e.g. +3_1 vs -3_1). For contracted K_5 views, the label and Wirtinger presentation describe the original cycle; the highlight shows its corresponding cycle in the contracted drawing, which may have a different knot type. "Next knot" / "Prev knot" step through them.
 - Knots within all K_3,3 / K_5 minors are computed in the background right after a search (starting from the shown one), so Next/Prev show results immediately once ready; the status line says while it is still searching.
 - "Highlight knot in full graph" (on by default) colours the original knotted loop orange in the full graph when "Show selected obstruction only" is off. This is not applied to contracted K_5 loops, which need not be loops of the original graph; the original edges of their minor model are highlighted instead.
 - "Simplify" (always KMT; also turns on "Show selected obstruction only") shows the simplified subgraph; "Knot within" then works on the simplified subgraph.
@@ -44,7 +44,7 @@ In the Advanced panel, "Highlight obstruction" shows the full structure and high
 
 This endpoint-replacement convention specifies one spatial embedding; it is not a canonical embedding of an abstract minor and can change knot types or create crossings during the move. The final embedding is checked for zero-length and intersecting segments; an invalid result is reported as an error instead of being classified. If source coordinates are unavailable, the existing 3D spring-layout fallback is used, so its knot results describe that generated layout, not a measured structure.
 
-The knotted search considers up to 1,000 candidate models and one contraction witness per model. It tests all 37 simple K_5 cycles in the resulting embedding and their corresponding original cycles using closed-loop HOMFLY. Candidates are retained if their contracted cycles are knotted, but the display warns when classifications differ, including when a knot disappears after contraction. "Knot within" shows the original label for each contracted knot and warns if handedness is undetermined. Matching HOMFLY labels do not prove that the contraction preserved the knot or that the curves are ambient isotopic. The additional original-cycle tests increase computation time.
+The knotted search considers up to 1,000 candidate models and one contraction witness per model. It tests all 37 simple K_5 cycles in the resulting drawing and their corresponding original cycles using closed-loop HOMFLY. A candidate is retained only if an original cycle is knotted and no cycle has a conflicting original-versus-contracted classification. On other contracted views, "Knot within" reports original-cycle classifications, identifies the drawn cycle's label and warns about disagreements or undetermined handedness. A drawn cycle can differ from its original even though the original label is shown. Matching HOMFLY labels do not prove that the contraction preserved the knot or that the curves are ambient isotopic. The additional original-cycle tests increase computation time.
 
 No result does **not** prove that no other contraction or model is knotted. Search deadlines are checked between candidates; an individual HOMFLY analysis may take longer. A timeout or inconclusive HOMFLY result for either cycle is reported as an error rather than an unknot. Contracted results use a separate cache version from legacy results; older contracted search and precomputation caches are not reused.
 
@@ -54,7 +54,7 @@ Knotted loops are detected on the whole loaded graph, that may be the simplified
 Knotted loops are detected automatically when the graph is loaded or changed, and the result appears in the "Knotted loops" section of the right panel.
 
 "Run HOMFLY" (in the "Advanced" section) runs a 500-try HOMFLY test once, on demand, on the currently shown obstruction subgraph. The result clears on the next change.
-For contracted K_5 embeddings it instead reports the first knotted contracted cycle, its original-cycle label, and any classification disagreement across the cycles; if no contracted cycle is knotted, it reports an unknot with any disagreement warning.
+For contracted K_5 embeddings it instead reports the first knotted original cycle, the corresponding drawn cycle's label, and any classification disagreement across the cycles; if no original cycle is knotted, it reports an unknot with any disagreement warning.
 
 ## Install Sage using MiniConda3
 

@@ -27,6 +27,7 @@ from graph_algorithms import (
     _knot_cache_path,
     _log,
     _node_coords,
+    _original_k5_cycle,
     _parse_nxyz_loop,
     _read_json,
     _sage_kuratowski_worker,
@@ -547,7 +548,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         n=len(subgraphs)
         name=FAMILY_LABELS[method]
         if n==0:
-            suffix=" (search is limited to 1,000 candidate models and one contraction per model)." if method=="k5knotcontracted" else ""
+            suffix=" (up to 1,000 candidate models, one contraction each; mismatched classifications are excluded)." if method=="k5knotcontracted" else ""
             return f"No {name} found.{suffix}"
         idx=(idx or 0)%n
         sources=subgraphs[idx].graph.get('sources')
@@ -557,7 +558,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if sources:
             text+=f" (found by {' and '.join(sources)})"
         if method=="k5knotcontracted":
-            text+="; up to 1,000 candidate models, one contraction each"
+            text+="; up to 1,000 candidate models, one contraction each; mismatched classifications excluded"
         if method in ("k5contracted","k5knotcontracted"):
             count=subgraphs[idx].graph.get('contraction_disagreements')
             text+=(contraction_warning(count,subgraphs[idx].graph['contraction_disagreement_pairs'])
@@ -705,16 +706,21 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         if knot[0] not in "+-":
             knot+=" (achiral or handedness undetermined)"
         comparison=""
+        shown=displayed_subgraph(idx,simplified,method)
+        presentation_nodes=k['nodes']
+        presentation_graph=shown
         if 'source_knot' in k:
-            comparison=f" Original cycle: {k['source_knot']} ({k['source_comparison']})."
+            comparison=f" Original cycle classification; drawn contracted cycle: {k['contracted_knot']} ({k['source_comparison']})."
             if k['source_comparison']=='different':
                 comparison=" WARNING: contraction changed this loop's knot classification."+comparison
             elif k['source_comparison']=='handedness unknown':
                 comparison=" WARNING: handedness could not be compared reliably."+comparison
+            presentation_nodes=_original_k5_cycle(shown,k['nodes'])
+            presentation_graph=shown.graph['k5_source_graph']
         return [f"Knot {widx%len(loops)+1} of {len(loops)}: {knot}, P={k['prob']:.2f}",
                 html.Strong(comparison+warning,style={"color":"#b71c1c"}) if 'WARNING' in comparison+warning else comparison+warning,
                 bg,
-                wirtinger_block(k['nodes'],displayed_subgraph(idx,simplified,method))]
+                wirtinger_block(presentation_nodes,presentation_graph)]
 
     @app.callback(Output("within-index","data"),Output("within-version","data"),Output("within-info","children"),
     Output("within-poll","disabled"),
@@ -1067,10 +1073,10 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                 if target_g.graph.get('strict_homfly'):
                     loops=find_knotted_loops(target_g,state.get('node_pos_3d'),tries=500,params=params)
                     knot_type,prob=(loops[0]['knot'],loops[0]['prob']) if loops else ('0_1',1.0)
-                    warning=" Result describes the contracted embedding, not necessarily the original structure."
+                    warning=" Result classifies an original cycle; the drawing is a contracted representation."
                     if loops:
                         first=loops[0]
-                        warning+=f" Original cycle: {first['source_knot']} ({first['source_comparison']})."
+                        warning+=f" Contracted cycle: {first['contracted_knot']} ({first['source_comparison']})."
                     count=target_g.graph['contraction_disagreements']
                     warning+=contraction_warning(count,target_g.graph['contraction_disagreement_pairs'])
                     if loops and loops[0]['source_comparison']=='handedness unknown':

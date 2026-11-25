@@ -679,7 +679,7 @@ def enumerate_k5_minors(graph, must_contain=None, limit=1000, deadline=None):
 
 def find_contracted_knotted_k5_minors(graph, node_pos_3d=None, params=None,
                                      max_results=None, time_limit=120, candidate_limit=1000):
-    """Find knotted contracted embeddings among the enumerated minor models."""
+    """Find minor models with knotted original cycles and no classification disagreements."""
     from k5_precompute import load_precomputed
     cached = load_precomputed(graph, node_pos_3d, candidate_limit)
     if cached is not None:
@@ -698,8 +698,8 @@ def find_contracted_knotted_k5_minors(graph, node_pos_3d=None, params=None,
             expanded = expand_k5_embedding(contracted)
             loops = find_knotted_loops(expanded, node_pos_3d,
                                        params=dict(params or {}, within='k5knotcontracted'))
-            if loops:
-                contracted.graph['sources'] = ['knotted contracted embedding']
+            if loops and not expanded.graph['contraction_disagreements']:
+                contracted.graph['sources'] = ['knotted original cycles']
                 contracted.graph['knotted_loops'] = loops
                 contracted.graph['contraction_disagreements'] = expanded.graph['contraction_disagreements']
                 contracted.graph['contraction_disagreement_pairs'] = expanded.graph['contraction_disagreement_pairs']
@@ -1022,7 +1022,7 @@ def _knot_cache_path(graph, node_pos_3d, tries, kind='', params=None):
     differ only in e.g. simplification still get distinct files."""
     import hashlib
     params = params or {}
-    version = 'v8-contracted-source-checked' if graph.graph.get('strict_homfly') else 'v4-closed'
+    version = 'v9-contracted-source-classified' if graph.graph.get('strict_homfly') else 'v4-closed'
     h = hashlib.sha256(f'{version}|{tries}|{kind}'.encode())
     for n in sorted(graph.nodes(), key=str):
         c = graph.nodes[n].get('coords')
@@ -1219,7 +1219,9 @@ def _find_knotted_loops(graph, node_pos_3d=None, tries=500, workers=None, analyz
             source_nodes = _original_k5_cycle(graph, loop_nodes)
             source_result = _isolated_homfly([source.nodes[n]['coords'] for n in source_nodes], tries)
             source_label = _checked_homfly_label(source_result, "the corresponding original K_5 cycle")
+            verdict = classify_homfly(source_result)
             comparison = dict(source_knot=source_label, contracted_knot=contracted_label,
+                              source_homfly=source_result,
                               source_comparison=_compare_knot_labels(contracted_label, source_label))
         with lock:
             if analyzed is not None:

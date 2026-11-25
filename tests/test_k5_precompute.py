@@ -29,10 +29,10 @@ class PrecomputeTests(unittest.TestCase):
             calls.append(tuple(expanded.nodes))
             if len(calls) == 2:
                 raise RuntimeError("interrupted")
-            expanded.graph['contraction_disagreements'] = 1
-            expanded.graph['contraction_disagreement_pairs'] = [('-3_1', '+3_1')]
-            return [{'nodes': list(expanded)[:3], 'knot': '+3_1', 'prob': 1.0, 'unknot_prob': 0.0,
-                     'source_knot': '-3_1', 'source_comparison': 'different'}]
+            expanded.graph['contraction_disagreements'] = 0
+            expanded.graph['contraction_disagreement_pairs'] = []
+            return [{'nodes': list(expanded)[:3], 'knot': '-3_1', 'prob': 1.0, 'unknot_prob': 0.0,
+                     'source_knot': '-3_1', 'contracted_knot': '-3_1', 'source_comparison': 'same'}]
 
         with tempfile.TemporaryDirectory() as cache, \
              patch.object(ga, 'KNOT_CACHE_DIR', cache), \
@@ -52,8 +52,8 @@ class PrecomputeTests(unittest.TestCase):
             restored = kp.load_precomputed(graph, candidate_limit=3)
             self.assertEqual([list(m.edges()) for m in results], [list(m.edges()) for m in restored])
             self.assertEqual(results[0].graph['knotted_loops'], restored[0].graph['knotted_loops'])
-            self.assertEqual(restored[0].graph['contraction_disagreements'], 1)
-            self.assertEqual(restored[0].graph['contraction_disagreement_pairs'], [['-3_1', '+3_1']])
+            self.assertEqual(restored[0].graph['contraction_disagreements'], 0)
+            self.assertEqual(restored[0].graph['contraction_disagreement_pairs'], [])
             self.assertEqual(restored[0].graph['knotted_loops'][0]['source_knot'], '-3_1')
             with patch.object(kp, 'VERSION', kp.VERSION - 1):
                 self.assertIsNone(kp.load_precomputed(graph, candidate_limit=3))
@@ -71,6 +71,20 @@ class PrecomputeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as cache, \
              patch.object(ga, 'KNOT_CACHE_DIR', cache), \
              patch.object(ga, 'find_knotted_loops', return_value=[]):
+            self.assertEqual(kp.precompute_knotted_k5(graph, candidate_limit=1), [])
+            self.assertEqual(kp.load_precomputed(graph, candidate_limit=1), [])
+
+    def test_precompute_excludes_disagreements(self):
+        graph = split_k5()
+
+        def find_loops(expanded, positions, params):
+            expanded.graph['contraction_disagreements'] = 1
+            expanded.graph['contraction_disagreement_pairs'] = [('-3_1', '+3_1')]
+            return [{'nodes': list(expanded)[:3], 'knot': '-3_1', 'source_comparison': 'same'}]
+
+        with tempfile.TemporaryDirectory() as cache, \
+             patch.object(ga, 'KNOT_CACHE_DIR', cache), \
+             patch.object(ga, 'find_knotted_loops', side_effect=find_loops):
             self.assertEqual(kp.precompute_knotted_k5(graph, candidate_limit=1), [])
             self.assertEqual(kp.load_precomputed(graph, candidate_limit=1), [])
 
