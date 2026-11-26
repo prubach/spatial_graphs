@@ -15,7 +15,7 @@ from graph_data import TopolyReduce
 
 
 VERSION = 1
-PDF_VERSION = 4
+PDF_VERSION = 5
 SECTIONS = {
     'knotted_loops': ('Knotted loops', 'All simple cycles are tested using closed-loop HOMFLY.'),
     'k33': ('K_3,3 subdivisions', 'Results from the available OGDF and SageMath finders.'),
@@ -210,6 +210,12 @@ def _pdf_bytes(report):
         if 'error' in section:
             body.append(Paragraph(f'<font color="#9b2727"><b>Error:</b> {escape(str(section["error"]))}</font>',
                                   body_style))
+        if 'latest_error' in section:
+            body.append(Paragraph(f'<font color="#9b2727"><b>Latest search failed:</b> '
+                                  f'{escape(str(section["latest_error"]))}</font>', body_style))
+        for warning in section.get('search_warnings', []):
+            body.append(Paragraph(f'<font color="#9b2727"><b>Latest search limitation:</b> '
+                                  f'{escape(str(warning))}</font>', body_style))
         if 'results' not in section:
             continue
         results = section['results']
@@ -243,6 +249,13 @@ def _pdf_bytes(report):
                     f"{status_label(status)}: {count}" for status, count in sorted(statuses.items())),
                     body_style))
                 analyses = [entry.get('analysis', {}).get(view, {}) for entry in results]
+                errors = Counter(str(analysis['latest_error']) for analysis in analyses
+                                 if analysis.get('latest_error'))
+                if errors:
+                    body.append(Paragraph(
+                        f'<font color="#9b2727"><b>Latest {view} analysis failures:</b> '
+                        + escape('; '.join(f'{error}: {count}' for error, count in sorted(errors.items())))
+                        + '</font>', body_style))
                 completed = [analysis for analysis in analyses
                              if analysis.get('status') in ('complete', 'partial') and 'knotted_loops' in analysis]
                 if completed:
@@ -310,6 +323,15 @@ def publish_section(graph, positions, params, key, section):
     _update_section(graph, positions, params, key, lambda _: section)
 
 
+def publish_failure(graph, positions, params, key, error):
+    """Keep earlier results when a later attempt fails, while recording the failure."""
+    def merge(old):
+        if old.get('status') in ('complete', 'partial'):
+            return {**old, 'latest_error': str(error)}
+        return {'status': 'failed', 'error': str(error)}
+    _update_section(graph, positions, params, key, merge)
+
+
 def _result_key(data):
     """Match the same embedded subgraph independent of node/edge iteration order."""
     nodes = sorted(json.dumps(node, sort_keys=True) for node in data['nodes'])
@@ -321,57 +343,87 @@ def _result_key(data):
     return json.dumps([data.get('kind'), nodes, sorted(edges)], sort_keys=True)
 
 
+def _family_status(entries, warnings=()):
+    return ('complete' if not warnings and all(
+        'theta_classification_error' not in entry['graph'] and
+        all(entry.get('analysis', {}).get(view, {}).get('status') == 'complete'
+            for view in ('original', 'simplified')) for entry in entries) else 'partial')
+
+
 def publish_found(graph, positions, params, key, subgraphs):
-    """Record an interactive family search while retaining analyses of matching results."""
-    entries = [{'index': i + 1, 'graph': graph_data(sub),
-                'analysis': {'original': {'status': 'not_precomputed'},
-                             'simplified': {'status': 'not_precomputed'}}}
-               for i, sub in enumerate(subgraphs)]
+    """Merge a family search with earlier results and their analyses."""
+    found = [{'index': i + 1, 'graph': graph_data(sub),
+              'analysis': {'original': {'status': 'not_precomputed'},
+                           'simplified': {'status': 'not_precomputed'}}}
+             for i, sub in enumerate(subgraphs)]
+    warnings = list(getattr(subgraphs, 'warnings', ()))
     def merge(old):
         previous = {_result_key(entry['graph']): entry for entry in old.get('results', [])}
+        retained = bool(warnings and old.get('status') == 'complete' and
+                        all(_result_key(entry['graph']) in previous for entry in found))
         matched = set()
+        entries = found[:]
         for entry in entries:
             key = _result_key(entry['graph'])
             prior = previous.get(key)
             if prior:
                 matched.add(key)
                 entry['analysis'] = prior.get('analysis', entry['analysis'])
-                for attr in ('theta_classification', 'theta_classification_error'):
-                    if attr in prior['graph'] and attr not in entry['graph']:
-                        entry['graph'][attr] = prior['graph'][attr]
+                if 'theta_classification' not in entry['graph'] and 'theta_classification' in prior['graph']:
+                    entry['graph']['theta_classification'] = prior['graph']['theta_classification']
+                    entry['graph'].pop('theta_classification_error', None)
+                elif ('theta_classification' not in entry['graph'] and
+                      'theta_classification_error' not in entry['graph'] and
+                      'theta_classification_error' in prior['graph']):
+                    entry['graph']['theta_classification_error'] = prior['graph']['theta_classification_error']
         entries.extend(entry for key, entry in previous.items() if key not in matched)
         for i, entry in enumerate(entries):
             entry['index'] = i + 1
-        complete = not entries or all(
-            all(entry['analysis'].get(view, {}).get('status') == 'complete'
-                for view in ('original', 'simplified')) for entry in entries)
-        return {'status': 'complete' if complete else 'partial', 'results': entries}
+        section = {'status': _family_status(entries, () if retained else warnings), 'results': entries}
+        if warnings:
+            section['search_warnings'] = warnings
+            if retained:
+                section['retained_complete_search'] = True
+        return section
     _update_section(graph, positions, params, key, merge)
 
 
-def update_found(graph, positions, params, key, subgraph, view=None, detail=None, classification=None):
-    """Merge a later analysis into the matching result, under the report lock."""
-    result_key = _result_key(graph_data(subgraph))
+def update_found_batch(graph, positions, params, key, updates):
+    """Merge analyses into matching results under the report lock."""
+    updates = [(_result_key(graph_data(subgraph)), view, detail, classification)
+               for subgraph, view, detail, classification in updates]
     def merge(section):
-        for entry in section.get('results', []):
-            if _result_key(entry['graph']) != result_key:
+        entries = {_result_key(entry['graph']): entry for entry in section.get('results', [])}
+        for result_key, view, detail, classification in updates:
+            entry = entries.get(result_key)
+            if entry is None:
                 continue
             if classification is not None:
                 entry['graph']['theta_classification'] = classification
                 entry['graph'].pop('theta_classification_error', None)
             if view is not None:
                 current = entry['analysis'].get(view, {'status': 'not_precomputed'})
-                entry['analysis'][view] = {**current, **detail}
+                if detail.get('status') == 'failed' and current.get('status') in ('complete', 'partial'):
+                    entry['analysis'][view] = {**current, 'latest_error': detail.get('error')}
+                else:
+                    entry['analysis'][view] = {**current, **detail}
+                    if detail.get('status') == 'complete':
+                        entry['analysis'][view].pop('latest_error', None)
+                        entry['analysis'][view].pop('error', None)
                 if current.get('status') == 'complete' and detail.get('status') == 'partial':
                     entry['analysis'][view]['status'] = 'complete'
                 if 'knotted_loops' in entry['analysis'][view] and 'homfly' in entry['analysis'][view]:
                     entry['analysis'][view]['status'] = 'complete'
-            section['status'] = ('complete' if all(
-                all(item.get('analysis', {}).get(v, {}).get('status') == 'complete'
-                    for v in ('original', 'simplified')) for item in section['results']) else 'partial')
-            break
+        if 'results' in section:
+            warnings = () if section.get('retained_complete_search') else section.get('search_warnings', ())
+            section['status'] = _family_status(section['results'], warnings)
         return section
     _update_section(graph, positions, params, key, merge)
+
+
+def update_found(graph, positions, params, key, subgraph, view=None, detail=None, classification=None):
+    """Merge a later analysis into the matching result."""
+    update_found_batch(graph, positions, params, key, [(subgraph, view, detail, classification)])
 
 
 def _report_manifest(graph, positions, params):

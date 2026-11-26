@@ -25,6 +25,7 @@ import structure_reports as reports
 
 METHODS = ("k33", "k5", "k33knot", "k5knot", "k5contracted", "k5knotcontracted", "theta")
 SIMPLIFY_METHOD = "kmt"
+REPORT_CHECKPOINT_SIZE = 20
 
 
 def simplified_ids():
@@ -154,48 +155,49 @@ def run(ids, methods, subgraphs, jobs, source="simplified"):
                         section = {'status': 'complete', 'results': future.result()}
                     except Exception as e:
                         failures.append(f'{pdbid} {source} knotted loops: {e}')
-                        section = {'status': 'failed', 'error': str(e)}
-                    publish(pdbid, 'knotted_loops', section)
+                        graph, positions, params = _context(pdbid, source)
+                        reports.publish_failure(graph, positions, params, 'knotted_loops', e)
+                    else:
+                        publish(pdbid, 'knotted_loops', section)
                 elif kind == 'find':
                     method = info
                     try:
                         found = future.result()
                     except Exception as e:
                         failures.append(f'{pdbid} {source} {method}: {e}')
-                        publish(pdbid, method, {'status': 'failed', 'error': str(e)})
+                        graph, positions, params = _context(pdbid, source)
+                        reports.publish_failure(graph, positions, params, method, e)
                         continue
-                    entries = [{'index': idx + 1, 'graph': reports.graph_data(sub),
-                                'analysis': {'original': {'status': 'not_precomputed'},
-                                             'simplified': {'status': 'not_precomputed'}}}
-                               for idx, sub in enumerate(found)]
-                    missing_classification = any('theta_classification_error' in sub.graph for sub in found)
+                    for warning in getattr(found, 'warnings', ()):
+                        failures.append(f'{pdbid} {source} {method}: {warning}')
                     for idx, sub in enumerate(found):
                         if 'theta_classification_error' in sub.graph:
                             failures.append(f"{pdbid} {source} theta #{idx + 1}: {sub.graph['theta_classification_error']}")
-                    section = {'status': 'partial' if found or missing_classification else 'complete',
-                               'results': entries}
-                    sections[pdbid, method] = {'section': section, 'remaining': 2 * len(found) if subgraphs else 0,
-                                                'failed': missing_classification}
+                    graph, positions, params = _context(pdbid, source)
+                    reports.publish_found(graph, positions, params, method, found)
+                    _log(f'{pdbid} {source}: report updated ({method})')
+                    sections[pdbid, method] = {'found': found, 'updates': [],
+                                                'remaining': 2 * len(found) if subgraphs else 0}
                     if subgraphs:
                         for idx, sub in enumerate(found):
                             for simplified in (False, True):
                                 task = ex.submit(subgraph_task, pdbid, method, idx, sub, simplified, source)
                                 pending[task] = ('subgraph', pdbid, (method, idx, simplified))
-                    publish(pdbid, method, section)
                 else:
                     method, idx, simplified = info
-                    state = sections[pdbid, method]
                     try:
                         detail = future.result()
                     except Exception as e:
                         failures.append(f'{pdbid} {source} {method} #{idx + 1} simplified={simplified}: {e}')
                         detail = {'status': 'failed', 'error': str(e)}
-                        state['failed'] = True
-                    state['section']['results'][idx]['analysis']['simplified' if simplified else 'original'] = detail
+                    state = sections[pdbid, method]
+                    state['updates'].append((state['found'][idx], 'simplified' if simplified else 'original',
+                                             detail, None))
                     state['remaining'] -= 1
-                    if not state['remaining']:
-                        state['section']['status'] = 'partial' if state['failed'] else 'complete'
-                        publish(pdbid, method, state['section'])
+                    if len(state['updates']) >= REPORT_CHECKPOINT_SIZE or not state['remaining']:
+                        graph, positions, params = _context(pdbid, source)
+                        reports.update_found_batch(graph, positions, params, method, state['updates'])
+                        state['updates'].clear()
     if failures:
         raise RuntimeError('Precomputation failed:\n' + '\n'.join(failures))
 

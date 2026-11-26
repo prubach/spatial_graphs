@@ -750,6 +750,13 @@ def find_knotted_k5_minors(graph, node_pos_3d=None, params=None, max_results=Non
     except StopIteration:
         pass
     return sorted(found.values(), key=lambda g: (g.number_of_nodes(), sorted(map(str, g.nodes()))))
+class SearchResults(list):
+    """A list of search results with non-fatal backend errors."""
+    def __init__(self, values=(), warnings=()):
+        super().__init__(values)
+        self.warnings = list(warnings)
+
+
 def find_k33_subgraphs(graph):
     """All K_3,3 subdivisions found by OGDF and SageMath, merged and deduplicated by edge set.
     Each subgraph records in graph['sources'] which finder(s) reported it; a finder that fails is skipped."""
@@ -773,7 +780,7 @@ def find_k33_subgraphs(graph):
             merged[edges].graph['sources'].append(label)
     if len(errors) == 2:
         raise RuntimeError("; ".join(errors))
-    return list(merged.values())
+    return SearchResults(merged.values(), warnings=errors)
 def find_obstructions(graph, method="ogdf", **kwargs):
     """Return obstruction subgraphs found by `method`."""
     if method == "k33":

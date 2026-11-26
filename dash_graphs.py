@@ -133,7 +133,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             if method in ("sage","k5","k33","k33knot","k5knot","k5contracted","k5knotcontracted") and multi_subgraphs:
                 obs=multi_subgraphs[0]
         source_edges=obs.graph.get('source_edges', list(obs.edges())) if obs is not None else []
-        return dict(planar=planar,obs=obs,
+        return dict(planar=planar,obs=obs,search_warnings=list(getattr(multi_subgraphs,'warnings',())),
                     obs_nodes={n for edge in source_edges for n in edge},
                     obs_edges={frozenset(e) for e in source_edges},
                     obs_pos={n:pos[n] for n in obs.nodes()} if obs is not None else {},
@@ -383,6 +383,11 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                     return False,True,"Report PDF could not be updated."
             incomplete=sum(s['status'] != 'complete' for s in report['sections'].values())
             text=f"Report available ({incomplete} incomplete or missing sections)." if incomplete else "Report available."
+            warnings=sum(bool(s.get('search_warnings') or s.get('latest_error')) or any(
+                analysis.get('latest_error') for entry in s.get('results', [])
+                for analysis in entry.get('analysis', {}).values()) for s in report['sections'].values())
+            if warnings:
+                text+=f" {warnings} section(s) have warnings about a later attempt."
             if error:
                 text+=f" Latest update failed: {error}"
             return False,False,text
@@ -674,7 +679,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         except Exception as e:
             return no_update,no_update,no_update,no_update,f"{FAMILY_LABELS[method]} search failed: {e}"
         state.update(res,obs_method=method,within_cache={},within_job=None)
-        message=""
+        message="; ".join(res.get('search_warnings',()))
         params=state.get('graph_params',{})
         if params.get('pdbid') and params.get('chain'):
             try:
