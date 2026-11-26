@@ -78,6 +78,122 @@ class ThetaClassificationTest(unittest.TestCase):
         self.assertEqual(res['name'], 'T3_1')
 
 
+class KnottedThetaSearchTest(unittest.TestCase):
+    def setUp(self):
+        self.cache = tempfile.TemporaryDirectory()
+        self.addCleanup(self.cache.cleanup)
+        patcher = patch.object(ga, 'KNOT_CACHE_DIR', self.cache.name)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def graph(self):
+        graph = nx.Graph()
+        for node in range(6):
+            graph.add_node(node, coords=(float(node), 0.0, 0.0))
+        for interior in range(2, 6):
+            graph.add_edges_from(((0, interior), (interior, 1)))
+        return graph
+
+    @staticmethod
+    def classification(name):
+        return {'method': 'topoly', 'name': name, 'chirality': None, 'polynomial': None}
+
+    def test_alternative_paths_and_noninitial_knotted_constituent(self):
+        graph = self.graph()
+        graph.add_node(6, coords=(6.0, 0.0, 0.0))
+        graph.add_edges_from(((0, 6), (6, 1)))
+        def homfly(coords, tries):
+            nodes = {int(p[0]) for p in coords}
+            return {'+3_1': 1.0} if {4, 5} <= nodes else {'0_1': 1.0}
+        with patch.object(ga, '_isolated_homfly', side_effect=homfly), \
+             patch.object(tc, 'cached_theta_classification', return_value=self.classification('T0_1')):
+            results = tc.find_knotted_thetas(graph)
+        self.assertEqual(results.examined, 10)
+        self.assertEqual(len(results), 3)
+        for theta in results:
+            self.assertTrue(tc.is_theta_graph(theta))
+            self.assertTrue({4, 5} <= set(theta.graph['knotted_constituent']['nodes']))
+            self.assertEqual(theta.graph['knotted_constituent']['knot'], '+3_1')
+        self.assertTrue(any('does not prove' in warning for warning in results.warnings))
+
+    def test_nontrivial_yamada_and_inconclusive_cases(self):
+        graph = self.graph()
+        with patch.object(ga, '_isolated_homfly', return_value={'0_1': 1.0}), \
+             patch.object(tc, 'cached_theta_classification', return_value=self.classification('T3_1')):
+            results = tc.find_knotted_thetas(graph)
+        self.assertEqual(len(results), 4)
+        self.assertEqual(results.warnings, [])
+        with patch.object(ga, '_isolated_homfly', return_value=None), \
+             patch.object(tc, 'cached_theta_classification', side_effect=RuntimeError('Yamada failed')):
+            results = tc.find_knotted_thetas(graph)
+        self.assertEqual(results, [])
+        self.assertTrue(any('inconclusive Yamada' in warning for warning in results.warnings))
+        self.assertTrue(any('inconclusive HOMFLY' in warning for warning in results.warnings))
+
+    def test_limits_and_deadline_after_classification(self):
+        graph = self.graph()
+        with patch.object(ga, '_isolated_homfly', return_value={'0_1': 1.0}), \
+             patch.object(tc, 'cached_theta_classification', return_value=self.classification('T3_1')):
+            for kwargs, expected in (({'result_limit': 1}, 'result limit'),
+                                     ({'candidate_limit': 1}, 'candidate limit'),
+                                     ({'cycle_limit': 1}, 'cycle limit')):
+                results = tc.find_knotted_thetas(graph, **kwargs)
+                self.assertTrue(any(expected in warning for warning in results.warnings), results.warnings)
+        clock = [0]
+        def classify(*args, **kwargs):
+            clock[0] = 2
+            return self.classification('T3_1')
+        with patch.object(tc.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(ga, '_isolated_homfly', return_value={'0_1': 1.0}), \
+             patch.object(tc, 'cached_theta_classification', side_effect=classify):
+            results = tc.find_knotted_thetas(graph, time_limit=1)
+        self.assertTrue(any('time limit' in warning for warning in results.warnings))
+
+    def test_1a8e_known_knotted_loop_is_extended_without_contraction(self):
+        graph, positions, params = precompute_cache._context('1A8E', 'simplified')
+        nodes = ['95_CA', '118_CA', '137_CA', '137_SG', '331_SG', '331_CA', '249_CA',
+                 '241_CA', '241_SG', '227_SG', '227_CA', '194_CA', '188_CA', '188_CG',
+                 '188_CD2', '188_CZ', '188_OH', '339_FE', '63_OD1', '63_CA']
+        loop = {'nodes': nodes, 'knot': '+3_1', 'prob': 1.0, 'unknot_prob': 0.0}
+        knot_cache = ga._knot_cache_path(graph, positions, 500, params=params)
+        read = ga._read_json
+        with patch.object(ga, '_read_json', side_effect=lambda path:
+                          {'loops': [loop], 'loops_analyzed': []} if path == knot_cache else read(path)):
+            results = tc.find_knotted_thetas(graph, positions, params, result_limit=2, time_limit=30)
+        self.assertEqual(len(results), 2)
+        for theta in results:
+            self.assertTrue(tc.is_theta_graph(theta))
+            self.assertTrue(all(graph.has_edge(u, v) for u, v in theta.edges()))
+            self.assertEqual(theta.graph['knotted_constituent']['knot'], '+3_1')
+            self.assertEqual(theta.graph['theta_classification']['name'], 'T3_1')
+
+    def test_1a8e_knotted_k33_contains_a_found_knotted_theta(self):
+        graph, positions, params = precompute_cache._context('1A8E', 'simplified')
+        paths = [
+            '188_CZ 188_OH 339_FE 63_OD1 63_CA 95_CA 118_CA 137_CA 137_SG 331_SG 331_CA 249_CA 241_CA 233_N 227_CA 194_CA 188_CA 188_CG 188_CZ',
+            '339_FE 249_NE2 249_CG 249_CA',
+            '188_CA 179_CA 179_SG 161_SG 161_CA 158_CA 137_CA',
+            '118_CA 118_SG 194_SG 194_CA',
+        ]
+        edges = [edge for path in paths for edge in zip(path.split(), path.split()[1:])]
+        model = graph.edge_subgraph(edges).copy()
+        cycle = paths[0].split()[:-1]
+        self.assertEqual(ga._checked_homfly_label(
+            ga._isolated_homfly([graph.nodes[n]['coords'] for n in cycle], 500),
+            'the known 1A8E cycle'), '+3_1')
+        loop = {'nodes': cycle, 'knot': '+3_1', 'prob': 1.0, 'unknot_prob': 0.0}
+        knot_cache = ga._knot_cache_path(model, positions, 500, params=params)
+        read = ga._read_json
+        with patch.object(ga, '_read_json', side_effect=lambda path:
+                          {'loops': [loop], 'loops_analyzed': []} if path == knot_cache else read(path)):
+            results = tc.find_knotted_thetas(model, positions, params, result_limit=2, time_limit=30)
+        self.assertTrue(results)
+        for theta in results:
+            self.assertTrue(tc.is_theta_graph(theta))
+            self.assertTrue(all(model.has_edge(u, v) for u, v in theta.edges()))
+            self.assertEqual(theta.graph['knotted_constituent']['knot'], '+3_1')
+
+
 class ThetaSearchUITest(unittest.TestCase):
     def setUp(self):
         cache = tempfile.TemporaryDirectory()
@@ -104,7 +220,7 @@ class ThetaSearchUITest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.data.decode())
         return response.get_json()['response']
 
-    def test_find_navigate_highlight_classify_and_export_planar_thetas(self):
+    def test_find_navigate_highlight_classify_and_export_thetas(self):
         graph = nx.disjoint_union(random_theta(1), random_theta(5))
         expected = tc.find_theta_subgraphs(graph)
         self.assertTrue(nx.check_planarity(graph)[0])
@@ -113,8 +229,11 @@ class ThetaSearchUITest(unittest.TestCase):
         values = {'find-k33-btn': 0, 'find-k5-btn': 0, 'find-k33knot-btn': 0,
                   'find-k5knot-btn': 0, 'find-theta-btn': 1, 'graph-version': 0,
                   'k5-representation': 'contracted'}
-        with patch('dash_graphs.threading.Thread.start'):
-            result = self.call(app, 'find-message.children', values, 'find-theta-btn.n_clicks')
+        with patch('dash_graphs.threading.Thread.start', lambda thread: thread.run()), \
+             patch('dash_graphs.find_knotted_thetas', return_value=tc.KnottedThetaResults(expected)):
+            started = self.call(app, 'find-message.children', values, 'find-theta-btn.n_clicks')
+            self.assertFalse(started['theta-search-poll']['disabled'])
+            result = self.call(app, 'find-message.children', values, 'theta-search-poll.n_intervals')
             self.assertEqual(result['mode']['value'], 'multi')
             self.assertEqual(result['selected-obstruction-only']['value'], ['on'])
             values.update({'mode': 'multi', 'subgraph-index': 0, 'graph-version': 1,
@@ -125,7 +244,7 @@ class ThetaSearchUITest(unittest.TestCase):
                            'rot3d': [0, 0, 0], 'show-grid': [], 'node-font-size': 14,
                            'prev-btn': 0, 'next-btn': 1, 'run-theta-btn': 1, 'theta-method': 'topoly'})
             label = self.call(app, 'subgraph-info.children', values, 'graph-version.data')
-            self.assertIn('Theta curve 1 of 2', label['subgraph-info']['children'])
+            self.assertIn('Knotted theta curve 1 of 2', label['subgraph-info']['children'])
             navigation = self.call(app, 'subgraph-index.data', values, 'next-btn.n_clicks')
             self.assertEqual(navigation['subgraph-index']['data'], 1)
             values['subgraph-index'] = 1
@@ -138,7 +257,7 @@ class ThetaSearchUITest(unittest.TestCase):
             figure = self.call(app, 'graph-3d.figure', values, 'subgraph-index.data')['graph-3d']['figure']
             self.assertEqual(set(figure['data'][-1]['text']), set(map(str, expected[1])))
             classification = self.call(app, 'theta-result.children', values, 'run-theta-btn.n_clicks')
-            self.assertIn('Found 1 theta curve', classification['theta-result']['children'])
+            self.assertIn('Theta classification', classification['theta-result']['children'])
             self.assertIn('T0_1', classification['theta-result']['children'])
             self.assertEqual(self.call(app, 'theta-result.children', values,
                                        'subgraph-index.data')['theta-result']['children'], '')
@@ -164,23 +283,51 @@ class ThetaSearchUITest(unittest.TestCase):
         nx.set_node_attributes(graph, {n: (float(n), float(n % 2), 0.0) for n in graph}, 'coords')
         app = create_app(graph)
         values = {'find-theta-btn': 1, 'graph-version': 0, 'k5-representation': 'contracted'}
-        result = self.call(app, 'find-message.children', values, 'find-theta-btn.n_clicks')
+        with patch('dash_graphs.threading.Thread.start', lambda thread: thread.run()):
+            self.call(app, 'find-message.children', values, 'find-theta-btn.n_clicks')
+            result = self.call(app, 'find-message.children', values, 'theta-search-poll.n_intervals')
         self.assertEqual(result['mode']['value'], 'original')
         info = self.call(app, 'subgraph-info.children', {'subgraph-index': 0, 'graph-version': 1},
                          'graph-version.data')
-        self.assertIn('No Theta curve found', info['subgraph-info']['children'])
+        self.assertIn('No Knotted theta curve found', info['subgraph-info']['children'])
 
     def test_limit_is_reported(self):
         graph = random_theta(1)
         app = create_app(graph)
-        with patch('dash_graphs.cached_theta_subgraphs', return_value=[graph] * (tc.MAX_THETA_CURVES + 1)) as search:
+        found = tc.KnottedThetaResults([graph], ['Theta search incomplete: result limit reached'], 1)
+        with patch('dash_graphs.threading.Thread.start', lambda thread: thread.run()), \
+             patch('dash_graphs.find_knotted_thetas', return_value=found) as search:
             values = {'find-theta-btn': 1, 'graph-version': 0, 'k5-representation': 'contracted'}
             self.call(app, 'find-message.children', values, 'find-theta-btn.n_clicks')
-            search.assert_called_once_with(graph, limit=tc.MAX_THETA_CURVES + 1)
+            result = self.call(app, 'find-message.children', values, 'theta-search-poll.n_intervals')
+            search.assert_called_once()
+            self.assertIn('incomplete', result['find-message']['children'])
             info = self.call(app, 'subgraph-info.children', {'subgraph-index': 0, 'graph-version': 1},
                              'graph-version.data')
-            self.assertIn('Theta curve 1 of 20', info['subgraph-info']['children'])
-            self.assertIn('first 20', info['subgraph-info']['children'])
+            self.assertIn('Knotted theta curve 1 of 1', info['subgraph-info']['children'])
+            self.assertIn('search incomplete', info['subgraph-info']['children'])
+
+    def test_stale_search_cannot_override_new_family(self):
+        graph = random_theta(1)
+        app = create_app(graph)
+        values = {'find-theta-btn': 1, 'find-k5-btn': 1, 'graph-version': 0,
+                  'k5-representation': 'model'}
+        with patch('dash_graphs.threading.Thread.start'):
+            self.call(app, 'find-message.children', values, 'find-theta-btn.n_clicks')
+            self.call(app, 'find-message.children', values, 'find-k5-btn.n_clicks')
+            stale = self.call(app, 'find-message.children', values, 'theta-search-poll.n_intervals')
+        self.assertTrue(stale['theta-search-poll']['disabled'])
+        self.assertNotIn('mode', stale)
+
+    def test_search_failure_is_visible(self):
+        app = create_app(random_theta(1))
+        values = {'find-theta-btn': 1, 'graph-version': 0}
+        with patch('dash_graphs.threading.Thread.start', lambda thread: thread.run()), \
+             patch('dash_graphs.find_knotted_thetas', side_effect=ValueError('bad geometry')):
+            self.call(app, 'find-message.children', values, 'find-theta-btn.n_clicks')
+            result = self.call(app, 'find-message.children', values, 'theta-search-poll.n_intervals')
+        self.assertIn('bad geometry', result['find-message']['children'])
+        self.assertTrue(result['theta-search-poll']['disabled'])
 
 
 class ThetaCacheTest(unittest.TestCase):
@@ -211,9 +358,8 @@ class ThetaCacheTest(unittest.TestCase):
     def test_empty_search_and_precompute_are_cached(self):
         graph = nx.cycle_graph(4)
         with patch.object(precompute_cache, '_context', return_value=(graph, None, {})), \
-             patch.object(tc, 'find_theta_subgraphs', wraps=tc.find_theta_subgraphs) as search:
+             patch.object(precompute_cache, 'find_knotted_thetas', wraps=tc.find_knotted_thetas) as search:
             self.assertEqual(precompute_cache.find_task('test', 'theta'), [])
-            self.assertEqual(tc.cached_theta_subgraphs(graph, tc.MAX_THETA_CURVES + 1), [])
             self.assertEqual(search.call_count, 1)
 
     def test_invalid_cache_is_recomputed_and_versions_are_distinct(self):

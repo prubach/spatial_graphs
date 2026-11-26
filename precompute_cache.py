@@ -19,7 +19,7 @@ from graph_algorithms import (
 )
 from graph_data import TopolyReduce, list_data_pdbids, load_graph_by_id, split_pdbid_chain
 from graph_visualization import get_node_positions_3d
-from theta_classification import MAX_THETA_CURVES, cached_theta_classification, cached_theta_subgraphs
+from theta_classification import find_knotted_thetas
 import structure_reports as reports
 
 METHODS = ("k33", "k5", "k33knot", "k5knot", "k5contracted", "theta")
@@ -82,13 +82,7 @@ def find_task(pdbid, method, source="simplified"):
     if method == "k5contracted":
         kwargs = dict(node_pos_3d=node_pos_3d)
     if method == "theta":
-        subs = cached_theta_subgraphs(G, limit=MAX_THETA_CURVES + 1)[:MAX_THETA_CURVES]
-        for sub in subs:
-            try:
-                sub.graph['theta_classification'] = cached_theta_classification(sub, node_pos_3d, method='topoly')
-            except Exception as e:
-                sub.graph['theta_classification_error'] = str(e)
-                _log(f"{pdbid} theta classification failed: {e}")
+        subs = find_knotted_thetas(G, node_pos_3d, params)
     elif method == "k5":
         subs = find_k5_minors(G, raise_on_timeout=True)
     elif method == "k5knot":
@@ -137,7 +131,7 @@ def run(ids, methods, subgraphs, jobs, source="simplified"):
     with ProcessPoolExecutor(max_workers=jobs) as ex:
         pending = {ex.submit(whole_graph_task, pdbid, source): ('whole', pdbid, None) for pdbid in available}
         pending.update({ex.submit(find_task, pdbid, method, source): ('find', pdbid, method)
-                        for pdbid in available for method in methods})
+                        for pdbid in available for method in methods if method != 'theta'})
         sections = {}
 
         def publish(pdbid, method, section):
@@ -158,6 +152,8 @@ def run(ids, methods, subgraphs, jobs, source="simplified"):
                         reports.publish_failure(graph, positions, params, 'knotted_loops', e)
                     else:
                         publish(pdbid, 'knotted_loops', section)
+                    if 'theta' in methods:
+                        pending[ex.submit(find_task, pdbid, 'theta', source)] = ('find', pdbid, 'theta')
                 elif kind == 'find':
                     method = info
                     try:

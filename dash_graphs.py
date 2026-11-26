@@ -13,7 +13,7 @@ import dash_cytoscape as cyto
 from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
-from theta_classification import MAX_THETA_CURVES, cached_theta_classification, cached_theta_subgraphs, is_theta_graph
+from theta_classification import cached_theta_classification, find_knotted_thetas, is_theta_graph
 from graph_algorithms import (
     HOMFLY_TIMEOUT,
     KNOT_CACHE_DIR,
@@ -121,9 +121,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         multi_subgraphs=[]
         theta_truncated=False
         if method=="theta":
-            multi_subgraphs=cached_theta_subgraphs(g,limit=MAX_THETA_CURVES+1)
-            theta_truncated=len(multi_subgraphs)>MAX_THETA_CURVES
-            multi_subgraphs=multi_subgraphs[:MAX_THETA_CURVES]
+            multi_subgraphs=kwargs.pop('theta_results',None)
+            if multi_subgraphs is None:
+                multi_subgraphs=find_knotted_thetas(g,get_node_positions_3d(g),state.get('graph_params',{}))
             if multi_subgraphs:
                 obs=multi_subgraphs[0]
         elif not planar:
@@ -143,7 +143,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     def recompute(g,method="ogdf",params=None):
         node_pos_3d=get_node_positions_3d(g)
         pos={n:(coord[0],coord[1]) for n,coord in node_pos_3d.items()}
-        state.update(G=g,pos=pos,node_pos_3d=node_pos_3d,knotted_loops=[],within_cache={},within_job=None,obs_method=method,graph_params=params or {},report_write_error=None,
+        state.update(G=g,pos=pos,node_pos_3d=node_pos_3d,knotted_loops=[],within_cache={},within_job=None,theta_job=None,obs_method=method,graph_params=params or {},report_write_error=None,
                      **compute_obstructions(g,pos,method))
     recompute(G,params=dict(pdbid=split_pdbid_chain(pdbid)[0] or None,chain=split_pdbid_chain(pdbid)[1] if pdbid else None,source="topoly" if is_topoly else "simplified",
                             reduce=str(TopolyReduce.INTERNAL),numbering="auth",merge_residues=False))
@@ -234,8 +234,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                         title="K_3,3 subdivisions containing a knotted loop (may take a while)"),
             html.Button("K_5 models with knotted loops",id="find-k5knot-btn",n_clicks=0,style=BTN_PRIMARY,
                         title="Original K_5 minor models containing knotted loops; no contracted embedding is classified"),
-            html.Button("Theta curves",id="find-theta-btn",n_clicks=0,style=BTN_PRIMARY,
-                        title="Find theta subdivisions in the whole graph"),
+            html.Button("Knotted theta curves",id="find-theta-btn",n_clicks=0,style=BTN_PRIMARY,
+                        title="Search for knotted theta subdivisions in the whole graph"),
+            dcc.Interval(id="theta-search-poll",interval=1000,disabled=True),
             dcc.RadioItems(id="k5-representation",inline=True,value="legacy",options=[
                 {"label":"Contracted K_5 (unverified topology)","value":"contracted"},
                 {"label":"Original minor model","value":"legacy"}],labelStyle=OPT),
@@ -294,8 +295,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         html.Button("Next >",id="knot-next-btn",n_clicks=0,style=BTN),
         ],style=ROW),
         html.Div([
-        html.Button("Find theta curves",id="run-theta-btn",n_clicks=0,style=BTN,
-                    title="Find theta subdivisions in the shown graph and classify them by Yamada polynomial"),
+        html.Button("Classify selected theta",id="run-theta-btn",n_clicks=0,style=BTN,
+                    title="Classify the displayed theta curve by its Yamada polynomial"),
         dcc.RadioItems(id="theta-method",inline=True,value="topoly",options=[
         {"label":"topoly","value":"topoly"},{"label":"knotpy","value":"knotpy"}],labelStyle=OPT),
         ],style=ROW),
@@ -453,6 +454,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         method=method or "ogdf"
         if method==state.get('obs_method'):
             raise PreventUpdate
+        state['theta_job']=None
         try:
             res=compute_obstructions(state['G'],state['pos'],method)
         except Exception as e:
@@ -629,13 +631,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
 
     FAMILY_LABELS={"k33":"K_3,3","k5":"K_5 minor model (legacy)","k33knot":"Knotted K_3,3",
                    "k5knot":"K_5 model containing a knotted loop","k5contracted":"Contracted K_5 minor",
-                   "theta":"Theta curve"}
+                   "theta":"Knotted theta curve"}
 
     @app.callback(Output("subgraph-info","children"),Input("subgraph-index","data"),Input("graph-version","data"))
     def update_info(idx,_version):
         method=state.get('obs_method')
         if method not in FAMILY_LABELS:
-            return "Click K_3,3, K_5 minor, Knotted K_3,3, K_5 models with knotted loops or Theta curves."
+            return "Click K_3,3, K_5 minor, Knotted K_3,3, K_5 models with knotted loops or Knotted theta curves."
         subgraphs=state['multi_subgraphs']
         n=len(subgraphs)
         name=FAMILY_LABELS[method]
@@ -645,7 +647,8 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         sources=subgraphs[idx].graph.get('sources')
         text=f"{name} {idx+1} of {n}"
         if method=="theta":
-            text+=f" (one subdivision per branch pair; {'first ' if state.get('theta_truncated') else 'up to '}{MAX_THETA_CURVES})"
+            if state.get('search_warnings'):
+                text+=" (search incomplete; see Find message)"
         if sources:
             text+=f" (found by {' and '.join(sources)})"
         if method=="k5contracted":
@@ -661,20 +664,52 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
 
     @app.callback(Output("graph-version","data",allow_duplicate=True),Output("subgraph-index","data",allow_duplicate=True),
     Output("mode","value",allow_duplicate=True),Output("selected-obstruction-only","value",allow_duplicate=True),
-    Output("find-message","children"),
+    Output("find-message","children"),Output("theta-search-poll","disabled"),
     Input("find-k33-btn","n_clicks"),Input("find-k5-btn","n_clicks"),Input("find-k33knot-btn","n_clicks"),Input("find-k5knot-btn","n_clicks"),Input("find-theta-btn","n_clicks"),
+    Input("theta-search-poll","n_intervals"),
     State("graph-version","data"),State("k5-representation","value"),prevent_initial_call=True)
-    def find_family(_k33,_k5,_k33knot,_k5knot,_theta,version,representation):
-        method={"find-k33-btn":"k33","find-k33knot-btn":"k33knot","find-k5knot-btn":"k5knot","find-theta-btn":"theta"}.get(ctx.triggered_id,"k5")
-        if representation=="contracted" and method=="k5":
-            method+="contracted"
-        extra=dict(node_pos_3d=state.get('node_pos_3d'),params=dict(state.get('graph_params',{}))) if method in ("k33knot","k5knot") else {}
-        if method in ("k5","k5knot"):
-            extra['raise_on_timeout']=True
-        try:
-            res=compute_obstructions(state['G'],state['pos'],method,**extra)
-        except Exception as e:
-            return no_update,no_update,no_update,no_update,f"{FAMILY_LABELS[method]} search failed: {e}"
+    def find_family(_k33,_k5,_k33knot,_k5knot,_theta,_poll,version,representation):
+        if ctx.triggered_id=="theta-search-poll":
+            job=state.get('theta_job')
+            if not job or job['graph'] is not state['G']:
+                return no_update,no_update,no_update,no_update,no_update,True
+            if job['running']:
+                return no_update,no_update,no_update,no_update,no_update,False
+            state['theta_job']=None
+            if job.get('error'):
+                return no_update,no_update,no_update,no_update,f"Knotted theta search failed: {job['error']}",True
+            method="theta"
+            res=compute_obstructions(job['graph'],state['pos'],method,theta_results=job['result'])
+        elif ctx.triggered_id=="find-theta-btn":
+            existing=state.get('theta_job')
+            if existing and existing['running'] and existing['graph'] is state['G']:
+                raise PreventUpdate
+            graph=state['G']
+            positions=state.get('node_pos_3d')
+            params=dict(state.get('graph_params',{}))
+            job={'graph':graph,'running':True}
+            state['theta_job']=job
+            def search():
+                try:
+                    job['result']=find_knotted_thetas(graph,positions,params)
+                except Exception as e:
+                    job['error']=str(e)
+                finally:
+                    job['running']=False
+            threading.Thread(target=search,daemon=True).start()
+            return no_update,no_update,no_update,no_update,"Searching for knotted theta curves in the background...",False
+        else:
+            state['theta_job']=None
+            method={"find-k33-btn":"k33","find-k33knot-btn":"k33knot","find-k5knot-btn":"k5knot"}.get(ctx.triggered_id,"k5")
+            if representation=="contracted" and method=="k5":
+                method+="contracted"
+            extra=dict(node_pos_3d=state.get('node_pos_3d'),params=dict(state.get('graph_params',{}))) if method in ("k33knot","k5knot") else {}
+            if method in ("k5","k5knot"):
+                extra['raise_on_timeout']=True
+            try:
+                res=compute_obstructions(state['G'],state['pos'],method,**extra)
+            except Exception as e:
+                return no_update,no_update,no_update,no_update,f"{FAMILY_LABELS[method]} search failed: {e}",True
         state.update(res,obs_method=method,within_cache={},within_job=None)
         message="; ".join(res.get('search_warnings',()))
         params=state.get('graph_params',{})
@@ -686,7 +721,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
                 state['report_write_error']=str(e)
                 message=f"Search completed, but report update failed: {e}"
         found=bool(res['multi_subgraphs'])
-        return (version or 0)+1,0,"multi" if found else "original",["on"] if found else [],message
+        return (version or 0)+1,0,"multi" if found else "original",["on"] if found else [],message,True
 
     @app.callback(Output("simplify-subgraph","value"),Output("selected-obstruction-only","value",allow_duplicate=True),
     Input("simplify-btn","n_clicks"),State("simplify-subgraph","value"),State("selected-obstruction-only","value"),
@@ -1256,45 +1291,28 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             target=g
         if target is None:
             return "No graph to classify"
+        if not is_theta_graph(target):
+            return "Select a theta curve to classify."
         try:
-            candidates=[target] if is_theta_graph(target) else cached_theta_subgraphs(
-                target,limit=MAX_THETA_CURVES+1)
-            if not candidates:
-                return "No theta curves found in the shown graph"
-            truncated=len(candidates)>MAX_THETA_CURVES
-            candidates=candidates[:MAX_THETA_CURVES]
-            labels=[]
-            for candidate in candidates:
-                res=cached_theta_classification(candidate,state.get('node_pos_3d'),method=tmethod)
-                name=res['name'] or "unlisted"
-                chir={'+':' (+)','-':' (mirror, -)'}.get(res['chirality'],'')
-                labels.append(f"{name}{chir}")
-                if target is g:
-                    candidate.graph['theta_classification']=res
-                if (mode=="multi" and not is_simplified and state.get('obs_method')=="theta"
-                        and len(candidates)==1 and candidate is target):
-                    params=state.get('graph_params',{})
-                    if params.get('pdbid') and params.get('chain'):
-                        try:
-                            structure_reports.update_found(g,state.get('node_pos_3d'),params,'theta',
-                                multi_subgraphs[(idx or 0)%len(multi_subgraphs)],classification=res)
-                        except Exception as e:
-                            state['report_write_error']=str(e)
-                            labels[-1]+=f" (report update failed: {e})"
-            if target is g:
+            res=cached_theta_classification(target,state.get('node_pos_3d'),method=tmethod)
+            name=res['name'] or "unlisted"
+            chir={'+':' (+)','-':' (mirror, -)'}.get(res['chirality'],'')
+            label=f"{name}{chir}"
+            if mode=="multi" and not is_simplified and state.get('obs_method')=="theta":
                 params=state.get('graph_params',{})
                 if params.get('pdbid') and params.get('chain'):
                     try:
-                        structure_reports.publish_found(g,state.get('node_pos_3d'),params,'theta',candidates)
+                        structure_reports.update_found(g,state.get('node_pos_3d'),params,'theta',
+                            multi_subgraphs[(idx or 0)%len(multi_subgraphs)],classification=res)
                     except Exception as e:
                         state['report_write_error']=str(e)
-                        labels[-1]+=f" (report update failed: {e})"
+                        label+=f" (report update failed: {e})"
         except Exception as e:
             return f"Theta classification failed: {e}"
-        result=f"Found {len(candidates)} theta curve(s): {', '.join(labels)} [Yamada, {tmethod}]"
-        if truncated:
-            result+=f" (showing the first {MAX_THETA_CURVES})"
-        elif any(label.startswith("unlisted") for label in labels):
+        result=f"Theta classification: {label} [Yamada, {tmethod}]"
+        if name == 'T0_1':
+            result+="; a trivial label does not prove the curve is unknotted"
+        elif name == 'unlisted':
             result+="; unlisted curves are outside the method's classification table"
         return result
 

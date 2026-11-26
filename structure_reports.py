@@ -15,7 +15,7 @@ from graph_data import TopolyReduce
 
 
 VERSION = 1
-PDF_VERSION = 6
+PDF_VERSION = 7
 RETIRED_SECTION = 'k5knotcontracted'
 SECTIONS = {
     'knotted_loops': ('Knotted loops', 'All simple cycles are tested using closed-loop HOMFLY.'),
@@ -24,7 +24,7 @@ SECTIONS = {
     'k5': ('K_5 minor models (legacy)', 'Up to 20 models from the legacy edge-deletion search.'),
     'k5knot': ('K_5 models containing knotted loops', 'Models enumerated from knotted original loops; the contracted minor is not classified.'),
     'k5contracted': ('Contracted K_5 minors', 'Up to 20 endpoint-replacement drawings; knot preservation is not guaranteed.'),
-    'theta': ('Theta curves', 'Up to 20 curves, at most one per branch-vertex pair; the search is not exhaustive.'),
+    'theta': ('Knotted theta curves', 'Cycle-plus-path search: up to 100 results, 1,000 candidates, 1,000 cycles or 60 seconds between operations. Trivial or unlisted Yamada labels do not prove a curve is unknotted.'),
 }
 
 
@@ -74,9 +74,12 @@ def graph_data(graph):
         edges.append(item)
     result = {'nodes': nodes, 'edges': edges}
     for key in ('kind', 'sources', 'contraction', 'contraction_disagreements', 'contraction_disagreement_pairs',
-                'theta_classification', 'theta_classification_error'):
+                'theta_classification', 'theta_classification_error', 'knotted_yamada'):
         if key in graph.graph:
             result[key] = graph.graph[key]
+    if 'knotted_constituent' in graph.graph:
+        witness = graph.graph['knotted_constituent']
+        result['knotted_constituent'] = {**witness, 'nodes': [str(n) for n in witness['nodes']]}
     if 'source_edges' in graph.graph:
         result['source_edges'] = [[str(a), str(b)] for a, b in graph.graph['source_edges']]
     if 'knotted_loops' in graph.graph:
@@ -227,8 +230,11 @@ def _pdf_bytes(report):
                     f'{label}: {count}' for label, count in sorted(labels.items()))))
         elif key == 'theta':
             classifications = Counter()
+            witnesses = Counter()
             for entry in results:
                 graph = entry['graph']
+                if 'knotted_constituent' in graph:
+                    witnesses[graph['knotted_constituent']['knot']] += 1
                 if 'theta_classification_error' in graph:
                     label = 'classification failed'
                 elif 'theta_classification' not in graph:
@@ -241,6 +247,11 @@ def _pdf_bytes(report):
             if classifications:
                 body.append(paragraph('Theta classifications:', ', '.join(
                     f'{label}: {count}' for label, count in sorted(classifications.items()))))
+            if witnesses:
+                body.append(paragraph('Knotted constituent types:', ', '.join(
+                    f'{label}: {count}' for label, count in sorted(witnesses.items()))))
+            if section.get('candidates_examined') is not None:
+                body.append(paragraph('Candidates examined:', str(section['candidates_examined'])))
         if key != 'knotted_loops' and results:
             for view in ('original', 'simplified'):
                 statuses = Counter(entry.get('analysis', {}).get(view, {}).get('status', 'not_precomputed')
@@ -291,14 +302,20 @@ def _write_report(location, report):
                   json.dumps({'version': VERSION, 'digest': digest, 'pdf_version': PDF_VERSION}).encode())
 
 
-def _retire_contracted_knotted(report):
+def _migrate_sections(report):
     section = report['sections'].pop(RETIRED_SECTION, None)
-    if section is None:
-        return False
+    changed = section is not None
     title, limits = SECTIONS['k5knot']
-    if 'k5knot' in report['sections']:
+    if changed and 'k5knot' in report['sections']:
         report['sections']['k5knot'].update(title=title, limitations=limits)
-    return True
+    from theta_classification import KNOTTED_THETA_SEARCH_VERSION
+    theta = report['sections'].get('theta')
+    if theta is None or theta.get('search_version') != KNOTTED_THETA_SEARCH_VERSION:
+        title, limits = SECTIONS['theta']
+        report['sections']['theta'] = {'title': title, 'limitations': limits, 'status': 'not_precomputed',
+                                       'search_version': KNOTTED_THETA_SEARCH_VERSION}
+        changed = True
+    return changed
 
 
 def _update_section(graph, positions, params, key, update):
@@ -319,9 +336,12 @@ def _update_section(graph, positions, params, key, update):
                 'sections': {name: {'title': title, 'status': 'not_precomputed', 'limitations': limits}
                              for name, (title, limits) in SECTIONS.items()},
             }
-        _retire_contracted_knotted(report)
+        _migrate_sections(report)
         title, limits = SECTIONS[key]
         section = update(report['sections'][key])
+        if key == 'theta':
+            from theta_classification import KNOTTED_THETA_SEARCH_VERSION
+            section['search_version'] = KNOTTED_THETA_SEARCH_VERSION
         report['sections'][key] = {'title': title, 'limitations': limits, **section}
         _write_report(location, report)
 
@@ -366,15 +386,15 @@ def publish_found(graph, positions, params, key, subgraphs):
     warnings = list(getattr(subgraphs, 'warnings', ()))
     def merge(old):
         previous = {_result_key(entry['graph']): entry for entry in old.get('results', [])}
-        retained = bool(warnings and old.get('status') == 'complete' and
+        retained = bool(key != 'theta' and warnings and old.get('status') == 'complete' and
                         all(_result_key(entry['graph']) in previous for entry in found))
         matched = set()
         entries = found[:]
         for entry in entries:
-            key = _result_key(entry['graph'])
-            prior = previous.get(key)
+            result_key = _result_key(entry['graph'])
+            prior = previous.get(result_key)
             if prior:
-                matched.add(key)
+                matched.add(result_key)
                 entry['analysis'] = prior.get('analysis', entry['analysis'])
                 if 'theta_classification' not in entry['graph'] and 'theta_classification' in prior['graph']:
                     entry['graph']['theta_classification'] = prior['graph']['theta_classification']
@@ -387,6 +407,10 @@ def publish_found(graph, positions, params, key, subgraphs):
         for i, entry in enumerate(entries):
             entry['index'] = i + 1
         section = {'status': _family_status(entries, () if retained else warnings), 'results': entries}
+        if key == 'theta':
+            from theta_classification import KNOTTED_THETA_SEARCH_VERSION
+            section['search_version'] = KNOTTED_THETA_SEARCH_VERSION
+            section['candidates_examined'] = getattr(subgraphs, 'examined', None)
         if warnings:
             section['search_warnings'] = warnings
             if retained:
@@ -490,13 +514,16 @@ def _read_report(graph, positions, params):
 
 def load_report(graph, positions, params):
     report = _read_report(graph, positions, params)
-    if report is None or RETIRED_SECTION not in report['sections']:
+    from theta_classification import KNOTTED_THETA_SEARCH_VERSION
+    theta = report['sections'].get('theta') if report is not None else None
+    if (report is None or (RETIRED_SECTION not in report['sections'] and
+                           theta is not None and theta.get('search_version') == KNOTTED_THETA_SEARCH_VERSION)):
         return report
     location = report_location(graph, positions, params)
     with open(os.path.join(location, '.lock'), 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         report = _read_report(graph, positions, params)
-        if report is not None and _retire_contracted_knotted(report):
+        if report is not None and _migrate_sections(report):
             _write_report(location, report)
         return report
 
@@ -511,7 +538,7 @@ def refresh_pdf(graph, positions, params):
         report = _read_report(graph, positions, params)
         if report is None:
             return False
-        if _retire_contracted_knotted(report):
+        if _migrate_sections(report):
             _write_report(location, report)
             return True
         _, manifest = _report_manifest(graph, positions, params)

@@ -17,6 +17,7 @@ import json
 import os
 import re
 import sys
+import time
 from itertools import combinations, islice
 
 import networkx as nx
@@ -26,8 +27,228 @@ log = logging.getLogger(__name__)
 METHODS = ('topoly', 'knotpy')
 MAX_THETA_CURVES = 20
 THETA_CACHE_VERSION = 1
+KNOTTED_THETA_SEARCH_VERSION = 2
+MAX_KNOTTED_THETAS = 100
+MAX_THETA_CANDIDATES = 1000
+MAX_THETA_CYCLES = 1000
+THETA_SEARCH_SECONDS = 60
 
 _KNOTPY_TABLE = None
+
+
+class KnottedThetaResults(list):
+    """Search results with explicit limits and classification uncertainties."""
+    def __init__(self, values=(), warnings=(), examined=0):
+        super().__init__(values)
+        self.warnings = list(warnings)
+        self.examined = examined
+
+
+def find_knotted_thetas(graph, positions=None, params=None, *, result_limit=MAX_KNOTTED_THETAS,
+                        candidate_limit=MAX_THETA_CANDIDATES, cycle_limit=MAX_THETA_CYCLES,
+                        time_limit=THETA_SEARCH_SECONDS):
+    """Search cycle-plus-path theta subdivisions, prioritizing cached knotted cycles.
+
+    A nontrivial Yamada label or a knotted constituent cycle is evidence of knotting.
+    Trivial or unlisted Yamada labels cannot prove a theta curve is unknotted.
+    Limits are checked between operations; a single classification can exceed the deadline.
+    """
+    import graph_algorithms as ga
+    if min(result_limit, candidate_limit, cycle_limit, time_limit) <= 0:
+        raise ValueError("Theta search limits must be positive")
+    deadline = time.monotonic() + time_limit
+    ordered = nx.Graph()
+    ordered.add_nodes_from((n, dict(graph.nodes[n])) for n in sorted(graph, key=str))
+    ordered.add_edges_from(sorted((tuple(sorted((u, v), key=str)) for u, v in graph.edges()),
+                                  key=lambda edge: tuple(map(str, edge))))
+    by_str = {str(n): n for n in ordered}
+    if len(by_str) != len(ordered):
+        raise ValueError("Theta search requires distinct string representations of node IDs")
+    cached = ga._read_json(ga._knot_cache_path(graph, positions, 500, params=params))
+    seeds, cached_cycles = [], {}
+    invalid_cache = 0
+    if isinstance(cached, dict) and isinstance(cached.get('loops_analyzed'), list):
+        for entry in cached['loops_analyzed']:
+            try:
+                nodes = [by_str[n] for n in entry['nodes']]
+                if (len(nodes) < 3 or len(set(nodes)) != len(nodes)
+                        or not all(ordered.has_edge(u, v) for u, v in zip(nodes, nodes[1:] + nodes[:1]))):
+                    raise ValueError("invalid cycle")
+                edges = frozenset(frozenset((u, v)) for u, v in zip(nodes, nodes[1:] + nodes[:1]))
+                cached_cycles[edges] = entry['homfly']
+            except (KeyError, TypeError, ValueError):
+                invalid_cache += 1
+                log.warning("Invalid cached cycle ignored during theta search")
+        loops = cached.get('loops', [])
+        if not isinstance(loops, list):
+            invalid_cache += 1
+            log.warning("Invalid cached knotted loop list ignored during theta search")
+            loops = []
+        for loop in loops:
+            try:
+                nodes = [by_str[n] for n in loop['nodes']]
+                if (len(nodes) >= 3 and len(set(nodes)) == len(nodes)
+                        and all(ordered.has_edge(u, v) for u, v in zip(nodes, nodes[1:] + nodes[:1]))
+                        and ga.classify_homfly({loop['knot']: loop['prob'],
+                                               '0_1': loop['unknot_prob']}) is not None):
+                    seeds.append((nodes, loop['knot']))
+                else:
+                    raise ValueError("invalid knotted loop")
+            except (KeyError, TypeError, ValueError):
+                invalid_cache += 1
+                log.warning("Invalid cached knotted loop ignored during theta search")
+
+    seen_cycles, seen_thetas, found, cycle_labels = set(), set(), [], {}
+    examined, cycles_examined, unknown, unproven, uncertain_cycles = 0, 0, 0, 0, 0
+    reason = None
+
+    def cycle_key(cycle):
+        return frozenset(frozenset((u, v)) for u, v in zip(cycle, cycle[1:] + cycle[:1]))
+
+    def cycle_label(cycle):
+        nonlocal uncertain_cycles
+        key = cycle_key(cycle)
+        if key not in cycle_labels:
+            result = cached_cycles.get(key)
+            if result is None:
+                coordinates = []
+                for n in cycle:
+                    coord = graph.nodes[n].get('coords')
+                    if coord is None and positions is not None:
+                        coord = positions.get(n)
+                    if coord is None:
+                        raise ValueError(f"No 3D coordinates for node {n!r}")
+                    coordinates.append([float(c) for c in coord])
+                result = ga._isolated_homfly(coordinates, 500)
+            try:
+                cycle_labels[key] = ga._checked_homfly_label(result, 'a theta constituent cycle')
+            except (RuntimeError, ValueError, TypeError):
+                uncertain_cycles += 1
+                cycle_labels[key] = None
+        return cycle_labels[key]
+
+    def process_cycle(cycle, knot):
+        nonlocal examined, unknown, unproven, uncertain_cycles, reason
+        cycle_nodes = set(cycle)
+        cycle_edges = cycle_key(cycle)
+        branches = [n for n in cycle if ordered.degree(n) >= 3]
+        cycle_knot = knot
+        cycle_checked = knot is not None
+        for u, v in combinations(branches, 2):
+            if time.monotonic() >= deadline:
+                reason = "time limit reached"
+                return
+            allowed = (set(ordered) - cycle_nodes) | {u, v}
+            paths_graph = ordered.subgraph(allowed)
+            for path in nx.all_simple_paths(paths_graph, u, v):
+                if time.monotonic() >= deadline:
+                    reason = "time limit reached"
+                    return
+                if len(path) == 2 and frozenset((u, v)) in cycle_edges:
+                    continue
+                edges = cycle_edges | frozenset(frozenset(e) for e in zip(path, path[1:]))
+                if edges in seen_thetas:
+                    continue
+                seen_thetas.add(edges)
+                theta = nx.Graph()
+                theta.add_nodes_from((n, dict(ordered.nodes[n])) for n in cycle + path)
+                theta.add_edges_from(zip(cycle, cycle[1:] + cycle[:1]))
+                theta.add_edges_from(zip(path, path[1:]))
+                if not is_theta_graph(theta):
+                    raise ValueError("Theta search produced an invalid subdivision")
+                examined += 1
+                if not cycle_checked:
+                    cycle_checked = True
+                    label = cycle_label(cycle)
+                    if label and label != '0_1':
+                        cycle_knot = label
+                knot = cycle_knot
+                if time.monotonic() >= deadline:
+                    if knot:
+                        theta.graph['knotted_constituent'] = {'nodes': list(cycle), 'knot': knot}
+                        theta.graph['theta_classification_error'] = 'Time limit reached before Yamada classification'
+                        found.append(theta)
+                    reason = "time limit reached"
+                    return
+                try:
+                    classification = cached_theta_classification(theta, positions, method='topoly')
+                    theta.graph['theta_classification'] = classification
+                    name = classification.get('name')
+                except Exception as e:
+                    theta.graph['theta_classification_error'] = str(e)
+                    name = None
+                witness = cycle
+                if not knot and (not name or name == 'T0_1') and time.monotonic() < deadline:
+                    for constituent in nx.simple_cycles(theta):
+                        if len(constituent) < 3 or cycle_key(constituent) == cycle_edges:
+                            continue
+                        label = cycle_label(constituent)
+                        if label and label != '0_1':
+                            knot, witness = label, constituent
+                            break
+                        if time.monotonic() >= deadline:
+                            break
+                if knot:
+                    theta.graph['knotted_constituent'] = {'nodes': list(witness), 'knot': knot}
+                if name and name != 'T0_1':
+                    theta.graph['knotted_yamada'] = dict(classification)
+                if name is None:
+                    unknown += 1
+                if knot or (name and name != 'T0_1'):
+                    found.append(theta)
+                    if len(found) >= result_limit:
+                        reason = f"result limit ({result_limit}) reached"
+                        return
+                elif name == 'T0_1':
+                    unproven += 1
+                if time.monotonic() >= deadline:
+                    reason = "time limit reached"
+                    return
+                if examined >= candidate_limit:
+                    reason = f"candidate limit ({candidate_limit}) reached"
+                    return
+
+    for cycle, knot in seeds:
+        key = cycle_key(cycle)
+        if key in seen_cycles:
+            continue
+        seen_cycles.add(key)
+        cycles_examined += 1
+        process_cycle(cycle, knot)
+        if reason:
+            break
+        if cycles_examined >= cycle_limit:
+            reason = f"cycle limit ({cycle_limit}) reached"
+            break
+    if not reason:
+        for cycle in nx.simple_cycles(ordered):
+            if time.monotonic() >= deadline:
+                reason = "time limit reached"
+                break
+            if len(cycle) < 3 or cycle_key(cycle) in seen_cycles:
+                continue
+            seen_cycles.add(cycle_key(cycle))
+            cycles_examined += 1
+            process_cycle(cycle, None)
+            if reason:
+                break
+            if cycles_examined >= cycle_limit:
+                reason = f"cycle limit ({cycle_limit}) reached"
+                break
+    if not reason and time.monotonic() >= deadline:
+        reason = "time limit reached"
+    warnings = []
+    if reason:
+        warnings.append(f"Theta search incomplete: {reason}; {examined} candidates examined")
+    if unknown:
+        warnings.append(f"{unknown} theta candidate(s) have an unlisted or inconclusive Yamada classification")
+    if uncertain_cycles:
+        warnings.append(f"{uncertain_cycles} constituent cycle(s) had inconclusive HOMFLY results")
+    if unproven:
+        warnings.append(f"{unproven} theta candidate(s) have a trivial Yamada label, which does not prove they are unknotted")
+    if invalid_cache:
+        warnings.append(f"{invalid_cache} invalid cached loop record(s) were ignored")
+    return KnottedThetaResults(found, warnings, examined)
 
 
 def is_theta_graph(graph):
