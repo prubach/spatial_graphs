@@ -679,40 +679,6 @@ def enumerate_k5_minors(graph, must_contain=None, limit=1000, deadline=None):
     return list(_iter_k5_minors(graph, must_contain, limit, deadline))
 
 
-def find_contracted_knotted_k5_minors(graph, node_pos_3d=None, params=None,
-                                     max_results=None, time_limit=120, candidate_limit=1000):
-    """Find minor models with knotted original cycles and no classification disagreements."""
-    from k5_precompute import load_precomputed
-    cached = load_precomputed(graph, node_pos_3d, candidate_limit)
-    if cached is not None:
-        return cached if max_results is None else cached[:max(0, max_results)]
-    deadline = time.monotonic() + time_limit
-    found = []
-    if (max_results is not None and max_results <= 0) or (candidate_limit is not None and candidate_limit <= 0):
-        return found
-    try:
-        for model in _iter_k5_minors(graph, limit=candidate_limit, deadline=deadline, strict=True):
-            witness = _find_k5_minor(model, deadline, set(), witness=True)
-            if not witness:
-                continue
-            contracted = _contracted_k5(graph, witness, node_pos_3d)
-            validate_k5_embedding(contracted)
-            expanded = expand_k5_embedding(contracted)
-            loops = find_knotted_loops(expanded, node_pos_3d,
-                                       params=dict(params or {}, within='k5knotcontracted'))
-            if loops and not expanded.graph['contraction_disagreements']:
-                contracted.graph['sources'] = ['knotted original cycles']
-                contracted.graph['knotted_loops'] = loops
-                contracted.graph['contraction_disagreements'] = expanded.graph['contraction_disagreements']
-                contracted.graph['contraction_disagreement_pairs'] = expanded.graph['contraction_disagreement_pairs']
-                found.append(contracted)
-                if max_results is not None and len(found) >= max_results:
-                    break
-            if time.monotonic() > deadline:
-                raise TimeoutError
-    except TimeoutError as e:
-        raise TimeoutError(f'Contracted knotted K_5 search timed out after {time_limit}s; results are incomplete') from e
-    return found
 def find_knotted_k5_minors(graph, node_pos_3d=None, params=None, max_results=None, time_limit=120,
                            raise_on_timeout=False):
     """K_5 minor models that contain a knotted loop of `graph`.
@@ -794,7 +760,7 @@ def find_obstructions(graph, method="ogdf", **kwargs):
     if method == "k5knot":
         return find_knotted_k5_minors(graph, **kwargs)
     if method == "k5knotcontracted":
-        return find_contracted_knotted_k5_minors(graph, **kwargs)
+        raise ValueError("Contracted knotted K_5 search was removed: contraction does not guarantee topology preservation")
     if method == "sage":
         return find_multiple_kuratowski_subgraphs_sage(graph)
     return find_multiple_kuratowski_subgraphs_ogdf(graph)

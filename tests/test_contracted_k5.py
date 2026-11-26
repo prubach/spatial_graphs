@@ -79,21 +79,9 @@ class ContractedK5Tests(unittest.TestCase):
         figure = build_3d_figure(expanded, coords)
         self.assertEqual(len(figure.data[-1].x), 5)
 
-    def test_new_search_analyzes_contracted_cycles_not_source_graph(self):
-        graph = split_k5()
-        sizes = []
-
-        def homfly(coords, tries):
-            sizes.append(len(coords))
-            return {'3_1': 1.0} if len(coords) > 5 else {'0_1': 1.0}
-
-        with tempfile.TemporaryDirectory() as cache, \
-             patch.object(ga, 'KNOT_CACHE_DIR', cache), \
-             patch.object(ga, '_isolated_homfly', side_effect=homfly):
-            result = ga.find_contracted_knotted_k5_minors(graph, time_limit=30)
-        self.assertEqual(result, [])
-        self.assertEqual(len(sizes), 74)
-        self.assertTrue(any(size > 5 for size in sizes))
+    def test_contracted_knotted_search_is_unavailable(self):
+        with self.assertRaisesRegex(ValueError, 'was removed'):
+            ga.find_obstructions(split_k5(), 'k5knotcontracted')
 
     def test_original_cycle_lifting_and_comparisons(self):
         graph = split_k5()
@@ -152,28 +140,6 @@ class ContractedK5Tests(unittest.TestCase):
              patch.object(ga, '_isolated_homfly', side_effect=[{'0_1': 1.0}, {'TMC': 1.0}]):
             with self.assertRaisesRegex(RuntimeError, 'corresponding original'):
                 ga.find_knotted_loops(expanded, workers=1)
-
-    def test_knotted_contracted_candidate_is_returned(self):
-        graph = trefoil_k5()
-        with tempfile.TemporaryDirectory() as cache, \
-             patch.object(ga, 'KNOT_CACHE_DIR', cache), \
-             patch.object(ga, '_isolated_homfly', return_value={'3_1': 1.0}):
-            result = ga.find_contracted_knotted_k5_minors(graph, max_results=1, time_limit=30)
-        self.assertEqual(len(result), 1)
-        self.assertEqual((len(result[0]), result[0].number_of_edges()), (5, 10))
-
-    def test_knotted_search_rejects_candidate_with_any_disagreement(self):
-        graph = split_k5()
-
-        def find_loops(expanded, positions, params):
-            expanded.graph['contraction_disagreements'] = 1
-            expanded.graph['contraction_disagreement_pairs'] = [('-3_1', '+3_1')]
-            return [{'knot': '-3_1', 'source_comparison': 'same'}]
-
-        with tempfile.TemporaryDirectory() as cache, \
-             patch.object(ga, 'KNOT_CACHE_DIR', cache), \
-             patch.object(ga, 'find_knotted_loops', side_effect=find_loops):
-            self.assertEqual(ga.find_contracted_knotted_k5_minors(graph, time_limit=30), [])
 
     def test_failed_homfly_is_not_an_unknot(self):
         model = ga.find_contracted_k5_minors(split_k5(), max_results=1)[0]
@@ -254,34 +220,6 @@ class ContractedK5Tests(unittest.TestCase):
             self.assertIn('WARNING', text)
             self.assertIn('knot_type: -3_1', text)
             self.assertIn('Contracted cycle: +3_1', text)
-
-            def no_contracted_knots(expanded, positions, **kwargs):
-                expanded.graph['contraction_disagreements'] = 1
-                expanded.graph['contraction_disagreement_pairs'] = [('-3_1', '0_1')]
-                return []
-
-            with patch('dash_graphs.find_knotted_loops', side_effect=no_contracted_knots):
-                values.update({'obstruction-method': 'k5knotcontracted', 'graph-version': 2})
-                call('obstruction-method-error.children', values, 'obstruction-method.value')
-                text = str(call('within-info.children', values, 'within-btn.n_clicks')['within-info']['children'])
-                self.assertIn('No knot found', text)
-                self.assertIn('WARNING', text)
-                self.assertIn('-3_1', text)
-                self.assertIn('0_1', text)
-                text = str(call('homfly-result.children', values, 'run-homfly-btn.n_clicks')['homfly-result']['children'])
-                self.assertIn('WARNING', text)
-                self.assertIn('-3_1', text)
-                self.assertIn('0_1', text)
-
-    def test_real_homfly_knots_before_and_after_contraction(self):
-        graph, cycle = split_k5_with_trefoil()
-        source = ga._isolated_homfly([graph.nodes[n]['coords'] for n in cycle], 500)
-        self.assertIsNotNone(ga.classify_homfly(source))
-        with tempfile.TemporaryDirectory() as cache, patch.object(ga, 'KNOT_CACHE_DIR', cache):
-            self.assertEqual(ga.find_contracted_knotted_k5_minors(graph, time_limit=120), [])
-            retained = ga.find_contracted_knotted_k5_minors(trefoil_k5(), max_results=1, time_limit=120)
-        self.assertEqual(len(retained), 1)
-        self.assertTrue(retained[0].graph['knotted_loops'])
 
     def test_protein_minor_uses_original_trefoil_handedness(self):
         roots = ['104_CA', '506_CA', '512_CA', '508_CA', '445_CA']
@@ -392,13 +330,6 @@ class ContractedK5Tests(unittest.TestCase):
             data = json.loads(exported['export-sub-download']['data']['content'])
             self.assertEqual({frozenset(e) for e in data['highlighted_edges']}, expected)
             self.assertEqual(len(data['nodes']), len(graph))
-            values.update({'find-k33-btn': 0, 'find-k5-btn': 0, 'find-k33knot-btn': 0,
-                           'find-k5knot-btn': 1, 'k5-representation': 'contracted'})
-            call('find-message.children', values, 'find-k5knot-btn.n_clicks')
-            elements = call('graph.elements', values, 'graph-version.data')['graph']['elements']
-            highlighted = {frozenset((e['data']['source'], e['data']['target'])) for e in elements
-                           if e.get('classes') == 'obstruction' and 'source' in e['data']}
-            self.assertEqual(highlighted, expected)
 
     def test_dash_selection_views_and_export(self):
         app = create_app(trefoil_k5())
@@ -448,13 +379,12 @@ class ContractedK5Tests(unittest.TestCase):
         label = call('subgraph-info.children', values, 'graph-version.data')
         self.assertIn('legacy', label['subgraph-info']['children'])
         values.update({'k5-representation': 'contracted', 'find-k5knot-btn': 1})
-        with tempfile.TemporaryDirectory() as cache, \
-             patch.object(ga, 'KNOT_CACHE_DIR', cache), \
-             patch.object(ga, '_isolated_homfly', return_value={'3_1': 1.0}):
+        with patch('dash_graphs.find_obstructions', return_value=[trefoil_k5()]) as finder:
             result = call('find-message.children', values, 'find-k5knot-btn.n_clicks')
+        self.assertEqual(finder.call_args.args[1], 'k5knot')
         self.assertEqual(result['find-message']['children'], '')
         label = call('subgraph-info.children', values, 'graph-version.data')
-        self.assertIn('Knotted contracted K_5', label['subgraph-info']['children'])
+        self.assertIn('K_5 model containing a knotted loop', label['subgraph-info']['children'])
 
 
 if __name__ == '__main__':

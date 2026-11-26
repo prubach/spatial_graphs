@@ -15,15 +15,15 @@ from graph_data import TopolyReduce
 
 
 VERSION = 1
-PDF_VERSION = 5
+PDF_VERSION = 6
+RETIRED_SECTION = 'k5knotcontracted'
 SECTIONS = {
     'knotted_loops': ('Knotted loops', 'All simple cycles are tested using closed-loop HOMFLY.'),
     'k33': ('K_3,3 subdivisions', 'Results from the available OGDF and SageMath finders.'),
     'k33knot': ('Knotted K_3,3 subdivisions', 'At most 100 results, enumerated from knotted loops.'),
     'k5': ('K_5 minor models (legacy)', 'Up to 20 models from the legacy edge-deletion search.'),
-    'k5knot': ('Knotted K_5 minor models (legacy)', 'Models enumerated from knotted original loops.'),
+    'k5knot': ('K_5 models containing knotted loops', 'Models enumerated from knotted original loops; the contracted minor is not classified.'),
     'k5contracted': ('Contracted K_5 minors', 'Up to 20 endpoint-replacement drawings; knot preservation is not guaranteed.'),
-    'k5knotcontracted': ('Knotted contracted K_5 minors', 'Up to 1,000 candidates and one contraction per model; classification disagreements are excluded.'),
     'theta': ('Theta curves', 'Up to 20 curves, at most one per branch-vertex pair; the search is not exhaustive.'),
 }
 
@@ -265,14 +265,6 @@ def _pdf_bytes(report):
                                f"{loop_count} knotted loops; {without_knots} without knotted loops. "
                                f"Subgraphs by knot type: {types}.")
                     body.append(Paragraph(escape(summary), body_style))
-            if key == 'k5knotcontracted':
-                search_loops = [entry['graph']['knotted_loops'] for entry in results
-                                if 'knotted_loops' in entry.get('graph', {})]
-                if search_loops:
-                    counts, _, _ = _subgraph_knot_summary([{'knotted_loops': loops} for loops in search_loops])
-                    types = ', '.join(f'{label}: {count}' for label, count in sorted(counts.items())) or 'none'
-                    body.append(Paragraph(escape(f"Search-time original-cycle knot types "
-                                                 f"({len(search_loops)} analyzed): {types}."), body_style))
 
     def footer(canvas, doc):
         canvas.saveState()
@@ -288,6 +280,27 @@ def _pdf_bytes(report):
     return buffer.getvalue()
 
 
+def _write_report(location, report):
+    report['generated_at'] = datetime.now(timezone.utc).isoformat()
+    json_bytes = json.dumps(report, indent=2, ensure_ascii=True, allow_nan=False).encode('utf-8')
+    pdf_bytes = _pdf_bytes(report)
+    digest = hashlib.sha256(json_bytes).hexdigest()
+    _atomic_write(os.path.join(location, digest + '.json'), json_bytes)
+    _atomic_write(os.path.join(location, f'{digest}.v{PDF_VERSION}.pdf'), pdf_bytes)
+    _atomic_write(os.path.join(location, 'latest.json'),
+                  json.dumps({'version': VERSION, 'digest': digest, 'pdf_version': PDF_VERSION}).encode())
+
+
+def _retire_contracted_knotted(report):
+    section = report['sections'].pop(RETIRED_SECTION, None)
+    if section is None:
+        return False
+    title, limits = SECTIONS['k5knot']
+    if 'k5knot' in report['sections']:
+        report['sections']['k5knot'].update(title=title, limitations=limits)
+    return True
+
+
 def _update_section(graph, positions, params, key, update):
     if key not in SECTIONS:
         raise ValueError(f'Unknown report section: {key}')
@@ -297,7 +310,7 @@ def _update_section(graph, positions, params, key, update):
     os.makedirs(location, exist_ok=True)
     with open(os.path.join(location, '.lock'), 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        report = load_report(graph, positions, params)
+        report = _read_report(graph, positions, params)
         if report is None:
             report = {
                 'version': VERSION, 'graph_identity': graph_identity(graph, positions, params),
@@ -306,17 +319,11 @@ def _update_section(graph, positions, params, key, update):
                 'sections': {name: {'title': title, 'status': 'not_precomputed', 'limitations': limits}
                              for name, (title, limits) in SECTIONS.items()},
             }
+        _retire_contracted_knotted(report)
         title, limits = SECTIONS[key]
         section = update(report['sections'][key])
         report['sections'][key] = {'title': title, 'limitations': limits, **section}
-        report['generated_at'] = datetime.now(timezone.utc).isoformat()
-        json_bytes = json.dumps(report, indent=2, ensure_ascii=True, allow_nan=False).encode('utf-8')
-        pdf_bytes = _pdf_bytes(report)
-        digest = hashlib.sha256(json_bytes).hexdigest()
-        _atomic_write(os.path.join(location, digest + '.json'), json_bytes)
-        _atomic_write(os.path.join(location, f'{digest}.v{PDF_VERSION}.pdf'), pdf_bytes)
-        _atomic_write(os.path.join(location, 'latest.json'),
-                      json.dumps({'version': VERSION, 'digest': digest, 'pdf_version': PDF_VERSION}).encode())
+        _write_report(location, report)
 
 def publish_section(graph, positions, params, key, section):
     """Atomically publish a JSON/PDF pair, merging previously completed sections."""
@@ -442,6 +449,7 @@ def _report_manifest(graph, positions, params):
 
 
 def report_paths(graph, positions, params):
+    load_report(graph, positions, params)
     found = _report_manifest(graph, positions, params)
     if found is None:
         return None
@@ -457,6 +465,7 @@ def report_paths(graph, positions, params):
 
 
 def report_json_path(graph, positions, params):
+    load_report(graph, positions, params)
     found = _report_manifest(graph, positions, params)
     if found is None:
         return None
@@ -464,7 +473,7 @@ def report_json_path(graph, positions, params):
     return os.path.join(location, manifest['digest'] + '.json')
 
 
-def load_report(graph, positions, params):
+def _read_report(graph, positions, params):
     found = _report_manifest(graph, positions, params)
     if found is None:
         return None
@@ -479,6 +488,19 @@ def load_report(graph, positions, params):
     return report
 
 
+def load_report(graph, positions, params):
+    report = _read_report(graph, positions, params)
+    if report is None or RETIRED_SECTION not in report['sections']:
+        return report
+    location = report_location(graph, positions, params)
+    with open(os.path.join(location, '.lock'), 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        report = _read_report(graph, positions, params)
+        if report is not None and _retire_contracted_knotted(report):
+            _write_report(location, report)
+        return report
+
+
 def refresh_pdf(graph, positions, params):
     """Upgrade an existing report's PDF without recomputing or changing its JSON."""
     location = report_location(graph, positions, params)
@@ -486,9 +508,12 @@ def refresh_pdf(graph, positions, params):
         return False
     with open(os.path.join(location, '.lock'), 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        report = load_report(graph, positions, params)
+        report = _read_report(graph, positions, params)
         if report is None:
             return False
+        if _retire_contracted_knotted(report):
+            _write_report(location, report)
+            return True
         _, manifest = _report_manifest(graph, positions, params)
         digest = manifest['digest']
         _atomic_write(os.path.join(location, f'{digest}.v{PDF_VERSION}.pdf'), _pdf_bytes(report))

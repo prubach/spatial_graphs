@@ -19,11 +19,10 @@ from graph_algorithms import (
 )
 from graph_data import TopolyReduce, list_data_pdbids, load_graph_by_id, split_pdbid_chain
 from graph_visualization import get_node_positions_3d
-from k5_precompute import precompute_knotted_k5
 from theta_classification import MAX_THETA_CURVES, cached_theta_classification, cached_theta_subgraphs
 import structure_reports as reports
 
-METHODS = ("k33", "k5", "k33knot", "k5knot", "k5contracted", "k5knotcontracted", "theta")
+METHODS = ("k33", "k5", "k33knot", "k5knot", "k5contracted", "theta")
 SIMPLIFY_METHOD = "kmt"
 REPORT_CHECKPOINT_SIZE = 20
 
@@ -73,11 +72,13 @@ def _context(pdbid, source="simplified"):
 
 def find_task(pdbid, method, source="simplified"):
     """Find the obstructions of one family."""
+    if method not in METHODS:
+        raise ValueError(f"Unsupported precomputation method: {method}")
     G, node_pos_3d, params = _context(pdbid, source)
     _log(f"{pdbid} {source}: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
     if method in ("k33knot", "k5knot"):
         _validated_loops(G, node_pos_3d, params)
-    kwargs = dict(node_pos_3d=node_pos_3d, params=dict(params)) if method in ("k33knot", "k5knot", "k5knotcontracted") else {}
+    kwargs = dict(node_pos_3d=node_pos_3d, params=dict(params)) if method in ("k33knot", "k5knot") else {}
     if method == "k5contracted":
         kwargs = dict(node_pos_3d=node_pos_3d)
     if method == "theta":
@@ -88,8 +89,6 @@ def find_task(pdbid, method, source="simplified"):
             except Exception as e:
                 sub.graph['theta_classification_error'] = str(e)
                 _log(f"{pdbid} theta classification failed: {e}")
-    elif method == "k5knotcontracted":
-        subs = precompute_knotted_k5(G, node_pos_3d, params)
     elif method == "k5":
         subs = find_k5_minors(G, raise_on_timeout=True)
     elif method == "k5knot":

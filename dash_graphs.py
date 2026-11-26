@@ -127,10 +127,10 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             if multi_subgraphs:
                 obs=multi_subgraphs[0]
         elif not planar:
-            if method in ("k5contracted","k5knotcontracted"):
+            if method=="k5contracted":
                 kwargs.setdefault('node_pos_3d',get_node_positions_3d(g))
             multi_subgraphs=find_obstructions(g,method,**kwargs)
-            if method in ("sage","k5","k33","k33knot","k5knot","k5contracted","k5knotcontracted") and multi_subgraphs:
+            if method in ("sage","k5","k33","k33knot","k5knot","k5contracted") and multi_subgraphs:
                 obs=multi_subgraphs[0]
         source_edges=obs.graph.get('source_edges', list(obs.edges())) if obs is not None else []
         return dict(planar=planar,obs=obs,search_warnings=list(getattr(multi_subgraphs,'warnings',())),
@@ -232,13 +232,13 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             html.Button("K_5 minor",id="find-k5-btn",n_clicks=0,style=BTN_PRIMARY),
             html.Button("Knotted K_3,3",id="find-k33knot-btn",n_clicks=0,style=BTN_PRIMARY,
                         title="K_3,3 subdivisions containing a knotted loop (may take a while)"),
-            html.Button("Knotted K_5 minor",id="find-k5knot-btn",n_clicks=0,style=BTN_PRIMARY,
-                        title="K_5 minors containing a knotted loop (may take a while)"),
+            html.Button("K_5 models with knotted loops",id="find-k5knot-btn",n_clicks=0,style=BTN_PRIMARY,
+                        title="Original K_5 minor models containing knotted loops; no contracted embedding is classified"),
             html.Button("Theta curves",id="find-theta-btn",n_clicks=0,style=BTN_PRIMARY,
                         title="Find theta subdivisions in the whole graph"),
-            dcc.RadioItems(id="k5-representation",inline=True,value="contracted",options=[
-                {"label":"Contracted K_5","value":"contracted"},
-                {"label":"Original minor model (legacy)","value":"legacy"}],labelStyle=OPT),
+            dcc.RadioItems(id="k5-representation",inline=True,value="legacy",options=[
+                {"label":"Contracted K_5 (unverified topology)","value":"contracted"},
+                {"label":"Original minor model","value":"legacy"}],labelStyle=OPT),
             dcc.Loading(html.Span(id="find-message",style={"fontSize":"12px","color":"crimson"}),type="circle"),
         ],style=ROW),
         ],style=ROW),
@@ -628,20 +628,19 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
         return set(nodes),edges
 
     FAMILY_LABELS={"k33":"K_3,3","k5":"K_5 minor model (legacy)","k33knot":"Knotted K_3,3",
-                   "k5knot":"Knotted K_5 model (legacy)","k5contracted":"Contracted K_5 minor",
-                   "k5knotcontracted":"Knotted contracted K_5 minor","theta":"Theta curve"}
+                   "k5knot":"K_5 model containing a knotted loop","k5contracted":"Contracted K_5 minor",
+                   "theta":"Theta curve"}
 
     @app.callback(Output("subgraph-info","children"),Input("subgraph-index","data"),Input("graph-version","data"))
     def update_info(idx,_version):
         method=state.get('obs_method')
         if method not in FAMILY_LABELS:
-            return "Click K_3,3, K_5 minor, Knotted K_3,3, Knotted K_5 minor or Theta curves."
+            return "Click K_3,3, K_5 minor, Knotted K_3,3, K_5 models with knotted loops or Theta curves."
         subgraphs=state['multi_subgraphs']
         n=len(subgraphs)
         name=FAMILY_LABELS[method]
         if n==0:
-            suffix=" (up to 1,000 candidate models, one contraction each; mismatched classifications are excluded)." if method=="k5knotcontracted" else ""
-            return f"No {name} found.{suffix}"
+            return f"No {name} found."
         idx=(idx or 0)%n
         sources=subgraphs[idx].graph.get('sources')
         text=f"{name} {idx+1} of {n}"
@@ -649,9 +648,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
             text+=f" (one subdivision per branch pair; {'first ' if state.get('theta_truncated') else 'up to '}{MAX_THETA_CURVES})"
         if sources:
             text+=f" (found by {' and '.join(sources)})"
-        if method=="k5knotcontracted":
-            text+="; up to 1,000 candidate models, one contraction each; mismatched classifications excluded"
-        if method in ("k5contracted","k5knotcontracted"):
+        if method=="k5contracted":
             count=subgraphs[idx].graph.get('contraction_disagreements')
             text+=(contraction_warning(count,subgraphs[idx].graph['contraction_disagreement_pairs'])
                    if count else "; contraction can change knot types; check Knot within for comparison")
@@ -669,9 +666,9 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
     State("graph-version","data"),State("k5-representation","value"),prevent_initial_call=True)
     def find_family(_k33,_k5,_k33knot,_k5knot,_theta,version,representation):
         method={"find-k33-btn":"k33","find-k33knot-btn":"k33knot","find-k5knot-btn":"k5knot","find-theta-btn":"theta"}.get(ctx.triggered_id,"k5")
-        if representation=="contracted" and method in ("k5","k5knot"):
+        if representation=="contracted" and method=="k5":
             method+="contracted"
-        extra=dict(node_pos_3d=state.get('node_pos_3d'),params=dict(state.get('graph_params',{}))) if method in ("k33knot","k5knot","k5knotcontracted") else {}
+        extra=dict(node_pos_3d=state.get('node_pos_3d'),params=dict(state.get('graph_params',{}))) if method in ("k33knot","k5knot") else {}
         if method in ("k5","k5knot"):
             extra['raise_on_timeout']=True
         try:
@@ -714,7 +711,7 @@ def create_app(G=None, title="Graph Planarity Visualization", pdbid="", is_topol
 
     def highlighted_obstruction(idx):
         subs=state['multi_subgraphs']
-        if state.get('obs_method') in ("k5contracted","k5knotcontracted","theta") and subs:
+        if state.get('obs_method') in ("k5contracted","theta") and subs:
             sub=subs[(idx or 0)%len(subs)]
             edges={frozenset(e) for e in sub.graph.get('source_edges',sub.edges())}
             return {n for edge in edges for n in edge},edges

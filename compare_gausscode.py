@@ -19,7 +19,7 @@ from queue import Empty
 
 NODE = re.compile(r"^[A-Za-z0-9]*?(-?\d+[A-Za-z]?):(\w+)$")
 SUBGRAPH_SEARCH_TIMEOUT = 120
-TIME_BOUNDED_METHODS = {"k33knot", "k5knot", "k5knotcontracted"}
+TIME_BOUNDED_METHODS = {"k33knot", "k5knot"}
 
 
 def node_name(token):
@@ -115,8 +115,6 @@ def identify_subgraphs(pdb, chain, method):
         kwargs = dict(node_pos_3d=positions, params=params)
         if method == "k5knot":
             kwargs.update(time_limit=SUBGRAPH_SEARCH_TIMEOUT - 1, raise_on_timeout=True)
-        elif method == "k5knotcontracted":
-            kwargs["time_limit"] = SUBGRAPH_SEARCH_TIMEOUT - 1
     elif method == "k5contracted":
         kwargs = dict(node_pos_3d=positions)
     else:
@@ -175,7 +173,7 @@ def main():
     args = ap.parse_args()
 
     rows, details, pres, subgraph_rows = [], [], {}, []
-    methods = ("k33", "k5", "k33knot", "k5knot", "k5contracted", "k5knotcontracted")
+    methods = ("k33", "k5", "k33knot", "k5knot", "k5contracted")
     paths = sorted(glob.glob("GaussCode/*_simple_cycles_with_gauss_report.txt")
                    + glob.glob("GaussCode/*_simple_cycles_with_ext_gauss_report.txt"))
     for path in paths:
