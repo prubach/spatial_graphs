@@ -1,0 +1,10 @@
+#!/bin/bash
+SPGR_HOME=/home/spgraph/spatial_graphs/
+OLD=`pwd`
+cd ${SPGR_HOME}
+git pull
+cd $OLD
+#rm  ${SPGR_HOME}/workshopapp/cache/*
+~/bin/spgr stop
+~/bin/spgr start
+#touch ${SPGR_HOME}/wsgi.py

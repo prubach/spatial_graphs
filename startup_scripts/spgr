@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+APP_DIR="/home/spgraph/spatial_graphs"
+CONDA_BASE="/home/spgraph/miniforge3"
+CONDA_ENV="sage"
+LOG_FILE="$APP_DIR/app.log"
+PID_FILE="$APP_DIR/app.pid"
+
+cd "$APP_DIR"
+
+is_running() {
+    [[ -f "$PID_FILE" ]] || return 1
+
+    local pid
+    pid=$(cat "$PID_FILE")
+
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    [[ -d "/proc/$pid" ]] || return 1
+
+    tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null |
+        grep -q '[d]ash_graphs.py'
+}
+
+start_app() {
+    if is_running; then
+        echo "App is already running (PID $(cat "$PID_FILE"))."
+        return 0
+    fi
+
+    rm -f "$PID_FILE"
+
+    if [[ ! -f "$CONDA_BASE/etc/profile.d/conda.sh" ]]; then
+        echo "Error: Conda not found at $CONDA_BASE" >&2
+        return 1
+    fi
+
+    if [[ ! -f "$APP_DIR/run.sh" ]]; then
+        echo "Error: $APP_DIR/run.sh not found." >&2
+        return 1
+    fi
+
+    # Initialize and activate the requested Conda environment.
+    source "$CONDA_BASE/etc/profile.d/conda.sh"
+    conda activate "$CONDA_ENV"
+
+    # Launch the application in the background.
+    nohup bash "$APP_DIR/run.sh" >>"$LOG_FILE" 2>&1 </dev/null &
+    local pid=$!
+
+    echo "$pid" > "$PID_FILE"
+    sleep 1
+
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "App started (PID $pid)."
+        echo "Log: $LOG_FILE"
+    else
+        rm -f "$PID_FILE"
+        echo "App exited during startup. Check $LOG_FILE."
+        return 1
+    fi
+}
+
+stop_app() {
+    if ! is_running; then
+        echo "App is not running."
+        rm -f "$PID_FILE"
+        return 0
+    fi
+
+    local pid
+    pid=$(cat "$PID_FILE")
+
+    echo "Stopping app (PID $pid)..."
+    kill -TERM "$pid"
+
+    # Wait up to 20 seconds.
+    for _ in {1..20}; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            rm -f "$PID_FILE"
+            echo "App stopped."
+            return 0
+        fi
+        sleep 1
+    done
+
+    echo "App did not stop within 20 seconds; sending SIGKILL."
+    kill -KILL "$pid" 2>/dev/null || true
+
+    sleep 1
+    rm -f "$PID_FILE"
+    echo "Stop completed."
+}
+
+status_app() {
+    if is_running; then
+        echo "App is running (PID $(cat "$PID_FILE"))."
+    else
+        echo "App is not running."
+        rm -f "$PID_FILE"
+    fi
+}
+
+case "${1:-}" in
+    start)
+        start_app
+        ;;
+    stop)
+        stop_app
+        ;;
+    restart)
+        stop_app
+        start_app
+        ;;
+    status)
+        status_app
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}" >&2
+        exit 2
+        ;;
+esac
